@@ -1,0 +1,5 @@
+{
+  "name": "Agenda de Camiones Pro",
+  "description": "Aplicación móvil para la gestión y reserva de camiones en tiempo real con roles de chofer y agendador.",
+  "requestFramePermissions": []
+}
