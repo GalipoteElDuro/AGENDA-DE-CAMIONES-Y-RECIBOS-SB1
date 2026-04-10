@@ -43,6 +43,7 @@ export default function App() {
   const [serviceLayer, setServiceLayer] = useState("");
   const [database, setDatabase] = useState("");
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [userSessionId, setUserSessionId] = useState<string | null>(null);
   const [trucks, setTrucks] = useState<TruckData[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -132,6 +133,7 @@ export default function App() {
       const data = await response.json();
       if (data.success) {
         setIsLoggedIn(true);
+        setUserSessionId(data.userSessionId);
       } else {
         setConfirmConfig({
           title: "Error de Autenticación",
@@ -154,13 +156,26 @@ export default function App() {
     }
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    if (userSessionId) {
+      try {
+        await fetch("/api/sap/logout", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userSessionId }),
+        });
+      } catch (error) {
+        console.error("Logout error:", error);
+      }
+    }
+    
     setIsLoggedIn(false);
     setRole(null);
     setUserName("");
     setPassword("");
     setServiceLayer("");
     setDatabase("");
+    setUserSessionId(null);
   };
 
   const createBooking = () => {

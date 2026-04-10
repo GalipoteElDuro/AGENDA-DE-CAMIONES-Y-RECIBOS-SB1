@@ -4,6 +4,7 @@ import { Server } from "socket.io";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import cors from "cors";
+import { createSapSession, removeSapSession, makeAuthenticatedRequest } from "./src/sap/serviceLayerClient";
 
 async function startServer() {
   const app = express();
@@ -27,37 +28,194 @@ async function startServer() {
   // Bookings: { truckId: string, date: string (YYYY-MM-DD), startTime: string (HH:mm), endTime: string (HH:mm), user: string, role: string, finished: boolean }
   let bookings: any[] = [];
 
+  // Store active SAP sessions with user mapping
+  const userSapSessions = new Map<string, {
+    serviceLayerUrl: string;
+    companyDB: string;
+    userName: string;
+    sapSessionId: string;
+  }>();
+
   app.use(cors());
   app.use(express.json());
 
-  // SAP B1 Proxy Login
+  /**
+   * SAP B1 Service Layer Login
+   * Authenticates against real SAP B1 Service Layer
+   */
   app.post("/api/sap/login", async (req, res) => {
     const { serviceLayerUrl, companyDB, userName, password } = req.body;
-    
+
+    // Validate required fields
+    if (!serviceLayerUrl || !companyDB || !userName || !password) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Todos los campos son requeridos: serviceLayerUrl, companyDB, userName, password" 
+      });
+    }
+
+    // Validate URL format
     try {
-      // In a real scenario, we would call the SAP Service Layer Login endpoint
-      // POST {{serviceLayerUrl}}/Login
-      // Body: { "CompanyDB": companyDB, "UserName": userName, "Password": password }
-      
-      console.log(`Intentando login en SAP B1: ${serviceLayerUrl} - DB: ${companyDB}`);
-      
-      // Simulating a successful SAP response for the demo environment
-      // In production, you would use fetch or axios here
-      const mockSapResponse = {
-        SessionId: "mock-session-id-" + Math.random().toString(36).substr(2),
-        Version: "10.0",
-        SessionTimeout: 30
-      };
+      const url = new URL(serviceLayerUrl);
+      if (!url.protocol.startsWith("http")) {
+        throw new Error("Invalid protocol");
+      }
+    } catch {
+      return res.status(400).json({ 
+        success: false, 
+        message: "URL del Service Layer no válida. Ejemplo: https://tu-servidor:50000/b1s/v1" 
+      });
+    }
+
+    // Generate a unique user session ID for tracking
+    const userSessionId = `${userName}_${Date.now()}`;
+
+    try {
+      console.log(`[SAP Login] Intentando conexión a: ${serviceLayerUrl} - DB: ${companyDB} - Usuario: ${userName}`);
+
+      // Real SAP B1 Service Layer authentication
+      const sapSession = await createSapSession(userSessionId, {
+        serviceLayerUrl,
+        companyDB,
+        userName,
+        password,
+      });
+
+      // Store session mapping
+      userSapSessions.set(userSessionId, {
+        serviceLayerUrl,
+        companyDB,
+        userName,
+        sapSessionId: sapSession.sessionId,
+      });
+
+      console.log(`[SAP Login] Exitoso - Session ID: ${sapSession.sessionId.substring(0, 20)}...`);
 
       res.json({
         success: true,
-        sessionId: mockSapResponse.SessionId,
+        sessionId: sapSession.sessionId,
+        userSessionId,
         user: userName,
-        db: companyDB
+        db: companyDB,
+        version: sapSession.version,
+        sessionTimeout: sapSession.sessionTimeout,
       });
-    } catch (error) {
-      console.error("SAP Login Error:", error);
-      res.status(401).json({ success: false, message: "Error de autenticación con SAP B1" });
+    } catch (error: any) {
+      console.error("[SAP Login Error]", error.message);
+      
+      // Parse SAP B1 error messages
+      let errorMessage = "Error de autenticación con SAP B1";
+      if (error.message?.includes("Session expired")) {
+        errorMessage = "La sesión ha expirado. Por favor inicia sesión nuevamente.";
+      } else if (error.message?.includes("Invalid")) {
+        errorMessage = "Credenciales no válidas. Verifica tu usuario y contraseña.";
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+
+      res.status(401).json({ 
+        success: false, 
+        message: errorMessage,
+        details: process.env.NODE_ENV !== "production" ? error.message : undefined,
+      });
+    }
+  });
+
+  /**
+   * SAP B1 Service Layer Logout
+   */
+  app.post("/api/sap/logout", async (req, res) => {
+    const { userSessionId } = req.body;
+
+    if (!userSessionId) {
+      return res.status(400).json({ success: false, message: "userSessionId is required" });
+    }
+
+    try {
+      await removeSapSession(userSessionId);
+      userSapSessions.delete(userSessionId);
+      
+      console.log(`[SAP Logout] Sesión cerrada para: ${userSessionId}`);
+      
+      res.json({ success: true, message: "Logout exitoso" });
+    } catch (error: any) {
+      console.error("[SAP Logout Error]", error.message);
+      res.status(500).json({ success: false, message: "Error al cerrar sesión" });
+    }
+  });
+
+  /**
+   * SAP B1 Service Layer Proxy
+   * Allows frontend to make authenticated requests to any SAP endpoint
+   */
+  app.post("/api/sap/request", async (req, res) => {
+    const { userSessionId, method, endpoint, body } = req.body;
+
+    if (!userSessionId || !method || !endpoint) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "userSessionId, method y endpoint son requeridos" 
+      });
+    }
+
+    const session = userSapSessions.get(userSessionId);
+    if (!session) {
+      return res.status(401).json({ 
+        success: false, 
+        message: "Sesión no encontrada. Por favor inicia sesión nuevamente." 
+      });
+    }
+
+    try {
+      const response = await makeAuthenticatedRequest(userSessionId, method, endpoint, body);
+      
+      const data = await response.json().catch(() => null);
+      
+      if (!response.ok) {
+        return res.status(response.status).json({
+          success: false,
+          message: data?.error?.message?.value || `Error: ${response.status} ${response.statusText}`,
+          data,
+        });
+      }
+
+      res.json({ success: true, data });
+    } catch (error: any) {
+      console.error("[SAP Request Error]", error.message);
+      res.status(500).json({ 
+        success: false, 
+        message: error.message || "Error en la petición a SAP B1" 
+      });
+    }
+  });
+
+  /**
+   * Get Business Partners from SAP B1
+   */
+  app.get("/api/sap/business-partners", async (req, res) => {
+    const { userSessionId } = req.query;
+
+    if (!userSessionId) {
+      return res.status(400).json({ success: false, message: "userSessionId is required" });
+    }
+
+    const session = userSapSessions.get(userSessionId as string);
+    if (!session) {
+      return res.status(401).json({ success: false, message: "Sesión no encontrada" });
+    }
+
+    try {
+      const response = await makeAuthenticatedRequest(
+        userSessionId as string,
+        "GET",
+        "BusinessPartners?$select=CardCode,CardName,CardType&$top=100"
+      );
+
+      const data = await response.json();
+      res.json({ success: true, data: data.value || [] });
+    } catch (error: any) {
+      console.error("[SAP BusinessPartners Error]", error.message);
+      res.status(500).json({ success: false, message: error.message });
     }
   });
 
