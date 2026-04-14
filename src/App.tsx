@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, FormEvent, useMemo } from "react";
 import { 
   Truck, User, Clock, CheckCircle2, LogOut, Shield,
   Calendar as CalendarIcon, ChevronLeft, ChevronRight, Plus, X, Server, Database, Lock,
-  Trash2, Edit, AlertTriangle
+  Trash2, Edit, AlertTriangle, Mail, Phone, MessageCircle
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { 
@@ -145,6 +145,7 @@ export default function App() {
   // Day Details Modal State
   const [showDayDetailsModal, setShowDayDetailsModal] = useState(false);
   const [selectedDayForDetails, setSelectedDayForDetails] = useState<Date | null>(null);
+  const [showContactModal, setShowContactModal] = useState(false);
 
   useEffect(() => {
     const fetchInitialData = async () => {
@@ -303,15 +304,7 @@ export default function App() {
       setTimeout(() => setSuccessMessage(null), 3000);
       
     } catch (error: any) {
-      setConfirmConfig({
-        title: "Fallo de Autenticación",
-        message: error.message || "No se pudo establecer conexión con el sistema.",
-        onConfirm: () => setShowConfirmModal(false),
-        type: "danger",
-        showCancel: false,
-        confirmLabel: "Reintentar"
-      });
-      setShowConfirmModal(true);
+      setErrorMessage(error.message || "No se pudo establecer conexión con el sistema.");
     } finally {
       setIsLoading(false);
     }
@@ -599,10 +592,22 @@ export default function App() {
                   </>
                 )}
               </button>
+              {errorMessage && (
+                <p className="text-sm font-semibold text-red-600 mt-3 px-1">
+                  {errorMessage}
+                </p>
+              )}
             </form>
 
-            <div className="mt-8 pt-6 border-t border-white/20 text-center">
-              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Powered by Antigravity Design System</p>
+            <div className="mt-6 pt-4 border-t border-white/20 text-center">
+              <button
+                type="button"
+                onClick={() => setShowContactModal(true)}
+                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white/70 px-4 py-2 text-[11px] font-bold text-slate-600 hover:border-primary/30 hover:text-primary transition-all"
+              >
+                <MessageCircle className="w-4 h-4" />
+                Contacto de soporte
+              </button>
             </div>
           </motion.div>
         </div>
@@ -1154,16 +1159,7 @@ export default function App() {
           <AnimatePresence>
             {showBookingModal && (
               <div className="modal-overlay fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-900/50 backdrop-blur-sm">
-                <motion.div 
-                  initial={{ opacity: 0, y: "20%", scale: 0.98 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: "20%", scale: 0.98 }}
-                  transition={{ 
-                    duration: 0.4, 
-                    ease: [0.22, 1, 0.36, 1]
-                  }}
-                  className="card w-full max-w-md overflow-hidden relative rounded-t-[2.5rem] sm:rounded-[2.5rem] pb-8 sm:pb-0 shadow-2xl"
-                >
+                <div className="card w-full max-w-md overflow-hidden relative rounded-t-[2.5rem] sm:rounded-[2.5rem] pb-8 sm:pb-0 shadow-2xl">
                   <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto my-4 sm:hidden" />
                   <div className="p-8 pt-4 sm:pt-8">
                     <div className="flex items-center justify-between mb-8">
@@ -1227,7 +1223,7 @@ export default function App() {
                       </div>
                     </div>
                   </div>
-                </motion.div>
+                </div>
               </div>
             )}
           </AnimatePresence>
@@ -1235,16 +1231,7 @@ export default function App() {
           <AnimatePresence>
             {showDayDetailsModal && selectedDayForDetails && (
               <div className="modal-overlay fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/50 backdrop-blur-sm">
-                <motion.div 
-                  initial={{ opacity: 0, y: "20%", scale: 0.98 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: "20%", scale: 0.98 }}
-                  transition={{ 
-                    duration: 0.4, 
-                    ease: [0.22, 1, 0.36, 1]
-                  }}
-                  className="card w-full max-w-md p-0 overflow-hidden shadow-2xl rounded-t-[2.5rem] sm:rounded-[2.5rem] pb-8 sm:pb-0"
-                >
+                <div className="card w-full max-w-md p-0 overflow-hidden shadow-2xl rounded-t-[2.5rem] sm:rounded-[2.5rem] pb-8 sm:pb-0">
                   <div className="w-12 h-1.5 bg-slate-200/20 rounded-full mx-auto my-4 sm:hidden absolute top-4 left-1/2 -translate-x-1/2 z-10" />
                   <div className="bg-primary p-6 text-white flex justify-between items-center">
                     <div>
@@ -1377,7 +1364,7 @@ export default function App() {
                       <button onClick={() => setShowDayDetailsModal(false)} className="flex-1 py-4 text-xs font-black uppercase tracking-[0.2em] text-slate-400 hover:text-slate-600 transition-colors">Cerrar Ventana</button>
                     </div>
                   </div>
-                </motion.div>
+                </div>
               </div>
             )}
           </AnimatePresence>
@@ -1388,16 +1375,7 @@ export default function App() {
       <AnimatePresence>
         {showConfirmModal && confirmConfig && (
           <div className="modal-overlay fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95, y: 10 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 10 }}
-              transition={{ 
-                duration: 0.3, 
-                ease: [0.22, 1, 0.36, 1]
-              }}
-              className="card w-full max-w-sm p-8 shadow-3xl text-center relative overflow-hidden"
-            >
+            <div className="card w-full max-w-sm p-8 shadow-3xl text-center relative overflow-hidden">
               <div className={`absolute top-0 left-0 right-0 h-1.5 ${confirmConfig.type === 'danger' ? 'bg-red-500' : 'bg-primary'}`} />
               
               <div className={`mx-auto w-16 h-16 rounded-3xl flex items-center justify-center mb-6 ${confirmConfig.type === 'danger' ? 'bg-red-50 text-red-500' : 'bg-primary/10 text-primary'}`}>
@@ -1422,7 +1400,65 @@ export default function App() {
                   </button>
                 )}
               </div>
-            </motion.div>
+            </div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showContactModal && (
+          <div className="modal-overlay fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
+            <div className="card w-full max-w-sm p-6 shadow-3xl relative overflow-hidden">
+              <div className="flex items-center justify-between mb-5">
+                <div>
+                  <h3 className="text-xl font-black tracking-tight">Contacto</h3>
+                  <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400 mt-1">Soporte de la aplicación</p>
+                </div>
+                <button
+                  onClick={() => setShowContactModal(false)}
+                  className="p-2 bg-slate-50 hover:bg-red-50 hover:text-red-500 rounded-xl transition-all"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="space-y-3">
+                <a
+                  href="mailto:propietario@empresa.com"
+                  className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white p-3 hover:border-primary/30 transition-all"
+                >
+                  <Mail className="w-4 h-4 text-primary" />
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-400">Correo</p>
+                    <p className="text-sm font-bold text-slate-700">propietario@empresa.com</p>
+                  </div>
+                </a>
+
+                <a
+                  href="https://wa.me/573000000000"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white p-3 hover:border-primary/30 transition-all"
+                >
+                  <MessageCircle className="w-4 h-4 text-primary" />
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-400">WhatsApp</p>
+                    <p className="text-sm font-bold text-slate-700">+57 300 000 0000</p>
+                  </div>
+                </a>
+
+                <a
+                  href="tel:+573000000000"
+                  className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white p-3 hover:border-primary/30 transition-all"
+                >
+                  <Phone className="w-4 h-4 text-primary" />
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-400">Teléfono</p>
+                    <p className="text-sm font-bold text-slate-700">+57 300 000 0000</p>
+                  </div>
+                </a>
+              </div>
+            </div>
           </div>
         )}
       </AnimatePresence>
