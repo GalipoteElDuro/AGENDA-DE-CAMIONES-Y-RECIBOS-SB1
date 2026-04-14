@@ -746,7 +746,7 @@ export default function App() {
                             className={`
                               calendar-cell aspect-square flex flex-col items-center justify-center rounded-2xl text-sm relative overflow-hidden border-2 border-transparent
                               ${!isCurrentMonth ? "opacity-10 cursor-default" : "cursor-pointer"}
-                              ${isSelected ? "bg-amber-500 text-white shadow-lg shadow-amber-200/70 z-10 border-amber-300/40" : "hover:bg-slate-50 text-slate-700"}
+                              ${isSelected ? "bg-primary text-white shadow-lg shadow-primary/30 z-10 border-primary/40" : "hover:bg-slate-50 text-slate-700"}
                               ${isToday && !isSelected ? "border-amber-500/20 text-amber-600" : ""}
                             `}
                             disabled={!isCurrentMonth}
@@ -1104,6 +1104,19 @@ export default function App() {
                     </div>
 
                     <div className="space-y-6">
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Fecha de agenda</label>
+                        <div className="relative group">
+                          <CalendarIcon className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-primary transition-colors" />
+                          <input
+                            type="date"
+                            value={format(selectedDate, "yyyy-MM-dd")}
+                            onChange={(e) => setSelectedDate(parse(e.target.value, "yyyy-MM-dd", new Date()))}
+                            className="w-full pl-12 pr-4 py-4 rounded-[1.25rem] border border-slate-200 bg-slate-50 focus:bg-white focus:ring-4 focus:ring-primary/10 transition-all font-bold text-sm"
+                          />
+                        </div>
+                      </div>
+
                       <div className="space-y-2">
                         <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Unidad de Transporte</label>
                         <div className="relative group">
