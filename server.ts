@@ -102,21 +102,28 @@ async function startServer() {
       });
     } catch (error: any) {
       console.error("[SAP Login Error]", error.message);
-      
+
       // Parse SAP B1 error messages
-      let errorMessage = "Error de autenticación con SAP B1";
-      if (error.message?.includes("Session expired")) {
-        errorMessage = "La sesión ha expirado. Por favor inicia sesión nuevamente.";
-      } else if (error.message?.includes("Invalid")) {
-        errorMessage = "Credenciales no válidas. Verifica tu usuario y contraseña.";
+      let errorMessage = "Error de conexión con SAP B1";
+      let statusCode = 500;
+
+      if (error.message?.includes("ECONNREFUSED") || error.message?.includes("ENOTFOUND")) {
+        errorMessage = "Servidor SAP inalcanzable. Verifica la URL y que el Service Layer esté activo.";
+        statusCode = 503;
+      } else if (error.message?.includes("401") || error.message?.toLowerCase().includes("invalid")) {
+        errorMessage = "Credenciales inválidas. Verifica usuario, contraseña y Base de Datos.";
+        statusCode = 401;
+      } else if (error.message?.includes("timeout")) {
+        errorMessage = "Tiempo de espera agotado al conectar con SAP.";
+        statusCode = 504;
       } else if (error.message) {
         errorMessage = error.message;
       }
 
-      res.status(401).json({ 
-        success: false, 
+      res.status(statusCode).json({
+        success: false,
         message: errorMessage,
-        details: process.env.NODE_ENV !== "production" ? error.message : undefined,
+        error: error.message
       });
     }
   });
