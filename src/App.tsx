@@ -33,12 +33,23 @@ interface Booking {
   category: "camion" | "recibo";
   isSap?: boolean;
   docNum?: string | number;
+  materialType?: "carga_ligera" | "carga_estandar" | "carga_pesada";
 }
 
 type Role = "chofer" | "agendador" | null;
 type Module = "agenda_camion" | "agenda_recibo";
 type BookingStatus = Booking["status"];
 type LoadState = "libre" | "medio" | "ocupado";
+type ReceiptFilterMode = "open" | "relevant" | "all";
+
+interface SapPurchaseOrder {
+  DocEntry: number;
+  DocNum: number;
+  CardName: string;
+  DocDueDate: string;
+  DocTotal: number;
+  DocStatus: "bost_Open" | "bost_Close" | string;
+}
 
 // Supabase real-time channel placeholder
 let bookingsChannel: any = null;
@@ -99,8 +110,9 @@ export default function App() {
   const [userSessionId, setUserSessionId] = useState<string | null>(null);
   const [trucks, setTrucks] = useState<TruckData[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
-  const [sapBookings, setSapBookings] = useState<any[]>([]);
+  const [sapBookings, setSapBookings] = useState<Booking[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [receiptFilterMode, setReceiptFilterMode] = useState<ReceiptFilterMode>("open");
   
   // New Booking State
   const [startTime, setStartTime] = useState("08:00");
@@ -178,44 +190,47 @@ export default function App() {
       const start = format(startOfMonth(currentMonth), "yyyy-MM-dd");
       const end = format(endOfMonth(currentMonth), "yyyy-MM-dd");
       
-      const response = await fetch("/api/sap/request", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          userSessionId,
-          method: "GET",
-          endpoint: `PurchaseOrders?$filter=DocDueDate ge '${start}' and DocDueDate le '${end}'&$select=DocEntry,DocNum,CardName,DocDueDate,DocTotal,DocStatus`
-        })
+      const params = new URLSearchParams({
+        userSessionId,
+        startDate: start,
+        endDate: end,
+        mode: receiptFilterMode,
       });
+
+      const response = await fetch(`/api/sap/purchase-orders?${params.toString()}`);
       
       const result = await response.json();
-      if (result.success && result.data?.value) {
-        const mapped = result.data.value.map((po: any) => ({
+      if (result.success && Array.isArray(result.data)) {
+        const mapped = result.data.map((po: SapPurchaseOrder) => ({
           id: po.DocEntry.toString(),
           truckId: "sap",
-          date: po.DocDueDate,
+          date: po.DocDueDate?.includes("T") ? po.DocDueDate.split("T")[0] : po.DocDueDate,
           startTime: "00:00",
           endTime: "23:59",
           user: po.CardName,
           status: po.DocStatus === "bost_Open" ? "pending" : "completed",
           category: "recibo" as const,
           isSap: true,
-          docNum: po.DocNum
+          docNum: po.DocNum,
+          materialType: po.DocTotal >= 10000 ? "carga_pesada" : po.DocTotal >= 3000 ? "carga_estandar" : "carga_ligera",
         }));
         setSapBookings(mapped);
+      } else {
+        setSapBookings([]);
       }
     } catch (error) {
       console.error("Error fetching SAP orders:", error);
+      setSapBookings([]);
     } finally {
       setIsLoading(false);
     }
-  }, [isLoggedIn, userSessionId, activeModule, currentMonth]);
+  }, [isLoggedIn, userSessionId, activeModule, currentMonth, receiptFilterMode]);
 
   useEffect(() => {
     if (activeModule === "agenda_recibo") {
       fetchSapOrders();
     }
-  }, [activeModule, currentMonth, isLoggedIn, fetchSapOrders]);
+  }, [activeModule, currentMonth, isLoggedIn, receiptFilterMode, fetchSapOrders]);
 
   useEffect(() => {
     // Set up Supabase Realtime
@@ -958,6 +973,38 @@ export default function App() {
                   <div>
                     <h2 className="text-3xl font-extrabold tracking-tight">Agenda de Recibo</h2>
                     <p className="text-[11px] text-slate-400 uppercase tracking-[0.2em] font-black mt-1">Planificación Logística de Entrada</p>
+                    <div className="mt-4 flex flex-wrap items-center gap-2">
+                      <button
+                        onClick={() => setReceiptFilterMode("open")}
+                        className={`px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-[0.18em] border transition-all ${
+                          receiptFilterMode === "open"
+                            ? "bg-primary text-white border-primary shadow-lg shadow-primary/20"
+                            : "bg-white text-slate-500 border-slate-200"
+                        }`}
+                      >
+                        Abiertas
+                      </button>
+                      <button
+                        onClick={() => setReceiptFilterMode("relevant")}
+                        className={`px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-[0.18em] border transition-all ${
+                          receiptFilterMode === "relevant"
+                            ? "bg-primary text-white border-primary shadow-lg shadow-primary/20"
+                            : "bg-white text-slate-500 border-slate-200"
+                        }`}
+                      >
+                        Relevantes
+                      </button>
+                      <button
+                        onClick={() => setReceiptFilterMode("all")}
+                        className={`px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-[0.18em] border transition-all ${
+                          receiptFilterMode === "all"
+                            ? "bg-primary text-white border-primary shadow-lg shadow-primary/20"
+                            : "bg-white text-slate-500 border-slate-200"
+                        }`}
+                      >
+                        Todas
+                      </button>
+                    </div>
                   </div>
                   <div className="flex items-center gap-4">
                     <div className="flex items-center bg-white p-2 rounded-2xl border border-slate-200 shadow-sm">
@@ -979,6 +1026,27 @@ export default function App() {
                         <Plus className="w-6 h-6" />
                       </button>
                     )}
+                  </div>
+                </div>
+
+                <div className="card p-4 sm:p-5">
+                  <div className="flex flex-wrap items-center gap-3 text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">
+                    <span className="flex items-center gap-1.5">
+                      <span className="inline-block h-2.5 w-2.5 rounded-full bg-emerald-500" />
+                      Carga ligera
+                    </span>
+                    <span className="flex items-center gap-1.5">
+                      <span className="inline-block h-2.5 w-2.5 rounded-full bg-amber-500" />
+                      Carga estandar
+                    </span>
+                    <span className="flex items-center gap-1.5">
+                      <span className="inline-block h-2.5 w-2.5 rounded-full bg-rose-500" />
+                      Carga pesada
+                    </span>
+                    <span className="flex items-center gap-1.5">
+                      <Database className="w-3.5 h-3.5 text-amber-600" />
+                      Orden SAP
+                    </span>
                   </div>
                 </div>
 
@@ -1020,11 +1088,16 @@ export default function App() {
                             }`}>
                               {format(day, "d")}
                             </span>
-                            {sapOrdersForDay.length > 0 && (
-                              <div className="bg-amber-100 text-amber-700 p-1 rounded-md" title="Orden de SAP">
-                                <Database className="w-3 h-3" />
-                              </div>
-                            )}
+                            <div className="flex items-center gap-1">
+                              {sapOrdersForDay.some((b) => b.materialType === "carga_pesada") && <span className="inline-block h-2 w-2 rounded-full bg-rose-500" title="Carga pesada" />}
+                              {sapOrdersForDay.some((b) => b.materialType === "carga_estandar") && <span className="inline-block h-2 w-2 rounded-full bg-amber-500" title="Carga estandar" />}
+                              {sapOrdersForDay.some((b) => b.materialType === "carga_ligera") && <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" title="Carga ligera" />}
+                              {sapOrdersForDay.length > 0 && (
+                                <div className="bg-amber-100 text-amber-700 p-1 rounded-md" title="Orden de SAP">
+                                  <Database className="w-3 h-3" />
+                                </div>
+                              )}
+                            </div>
                           </div>
                           
                           <div className="flex-1 flex flex-col items-center justify-center">
@@ -1219,6 +1292,21 @@ export default function App() {
                                 <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1">
                                   {b.isSap ? poTitle(b.user) : `Ref: ${b.user}`}
                                 </div>
+                                {b.isSap && (
+                                  <div className={`inline-flex mt-2 px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-[0.18em] ${
+                                    b.materialType === "carga_pesada"
+                                      ? "bg-rose-100 text-rose-700"
+                                      : b.materialType === "carga_estandar"
+                                        ? "bg-amber-100 text-amber-700"
+                                        : "bg-emerald-100 text-emerald-700"
+                                  }`}>
+                                    {b.materialType === "carga_pesada"
+                                      ? "Carga pesada"
+                                      : b.materialType === "carga_estandar"
+                                        ? "Carga estandar"
+                                        : "Carga ligera"}
+                                  </div>
+                                )}
                               </div>
                               {b.isSap && (
                                 <Database className="w-4 h-4 text-amber-500 ml-auto" />

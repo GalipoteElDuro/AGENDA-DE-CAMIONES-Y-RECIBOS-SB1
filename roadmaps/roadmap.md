@@ -21,11 +21,11 @@ La aplicación se divide en dos pilares fundamentales:
 - [x] **Detalle en Móvil:** Implementación de vistas de detalle mejoradas (Bottom Sheets) para evitar navegación profunda.
 - [x] **Filtros Rápidos:** Capacidad de filtrar el calendario por unidad de transporte específica.
 
-## 📦 Fase 3: Integración SAP B1 (Agenda de Recibo)
-- [ ] **Sincronización de OC:** Configurar el endpoint para traer Ordenes de Compra (`OPCH` o `POR1`) desde el Service Layer.
-- [ ] **Mapeo de Fechas:** Vincular el campo `DocDueDate` (Fecha de vencimiento/entrega prevista) al calendario de recibos.
-- [ ] **Filtros Inteligentes:** Mostrar solo órdenes abiertas o relevantes para el equipo de almacén.
-- [ ] **Vista de Lectura:** Asegurar que el calendario de recibos sea claro y diferencie visualmente los tipos de mercancía.
+## ✅ Fase 3: Integración SAP B1 (Agenda de Recibo) (Completado)
+- [x] **Sincronización de OC:** Configurar el endpoint para traer Ordenes de Compra (`OPCH` o `POR1`) desde el Service Layer.
+- [x] **Mapeo de Fechas:** Vincular el campo `DocDueDate` (Fecha de vencimiento/entrega prevista) al calendario de recibos.
+- [x] **Filtros Inteligentes:** Mostrar solo órdenes abiertas o relevantes para el equipo de almacén.
+- [x] **Vista de Lectura:** Asegurar que el calendario de recibos sea claro y diferencie visualmente los tipos de mercancía.
 
 ## 💫 Fase 4: Autenticación Supabase y Refinamiento
 - [ ] **Sesión Persistente:** Migrar el login actual a Supabase Auth para mantener sesiones activas y seguras.

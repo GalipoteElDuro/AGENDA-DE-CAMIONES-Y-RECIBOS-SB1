@@ -226,6 +226,72 @@ async function startServer() {
     }
   });
 
+  /**
+   * Get Purchase Orders from SAP B1 for receipt scheduling
+   * Smart filter modes:
+   * - open: only open orders (default)
+   * - relevant: open orders with positive total
+   * - all: includes open and closed orders
+   */
+  app.get("/api/sap/purchase-orders", async (req, res) => {
+    const { userSessionId, startDate, endDate, mode = "open" } = req.query as {
+      userSessionId?: string;
+      startDate?: string;
+      endDate?: string;
+      mode?: "open" | "relevant" | "all";
+    };
+
+    if (!userSessionId || !startDate || !endDate) {
+      return res.status(400).json({
+        success: false,
+        message: "userSessionId, startDate y endDate son requeridos",
+      });
+    }
+
+    const session = userSapSessions.get(userSessionId);
+    if (!session) {
+      return res.status(401).json({ success: false, message: "Sesión no encontrada" });
+    }
+
+    const dateRangeFilter = `DocDueDate ge '${startDate}' and DocDueDate le '${endDate}'`;
+    const openFilter = "DocStatus eq 'bost_Open'";
+    const relevantFilter = "DocStatus eq 'bost_Open' and DocTotal gt 0";
+
+    const combinedFilter = mode === "all"
+      ? dateRangeFilter
+      : mode === "relevant"
+        ? `${dateRangeFilter} and ${relevantFilter}`
+        : `${dateRangeFilter} and ${openFilter}`;
+
+    const endpoint = `PurchaseOrders?$filter=${combinedFilter}&$select=DocEntry,DocNum,CardName,DocDueDate,DocTotal,DocStatus&$orderby=DocDueDate asc&$top=300`;
+
+    try {
+      const response = await makeAuthenticatedRequest(
+        userSessionId,
+        "GET",
+        endpoint
+      );
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        return res.status(response.status).json({
+          success: false,
+          message: data?.error?.message?.value || "Error consultando órdenes de compra en SAP",
+          data,
+        });
+      }
+
+      res.json({
+        success: true,
+        data: data?.value || [],
+      });
+    } catch (error: any) {
+      console.error("[SAP PurchaseOrders Error]", error.message);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
   // Socket.io logic
   io.on("connection", (socket) => {
     console.log("User connected:", socket.id);
