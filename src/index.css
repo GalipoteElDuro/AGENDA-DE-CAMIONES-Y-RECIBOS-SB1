@@ -115,11 +115,10 @@
 
 /* Calendar cell hover - GPU accelerated */
 .calendar-cell {
-  transition: background-color 150ms ease, transform 150ms ease;
-  will-change: transform;
+  transition: background-color 150ms ease, box-shadow 150ms ease, border-color 150ms ease;
 }
 .calendar-cell:hover {
-  transform: scale(1.04) translateZ(0);
+  transform: none;
 }
 
 /* Truck card transition - hardware layer */

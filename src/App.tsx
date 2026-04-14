@@ -31,13 +31,61 @@ interface Booking {
   user: string;
   status: "pending" | "in_progress" | "completed";
   category: "camion" | "recibo";
+  isSap?: boolean;
+  docNum?: string | number;
 }
 
 type Role = "chofer" | "agendador" | null;
 type Module = "agenda_camion" | "agenda_recibo";
+type BookingStatus = Booking["status"];
+type LoadState = "libre" | "medio" | "ocupado";
 
 // Supabase real-time channel placeholder
 let bookingsChannel: any = null;
+
+const DAY_START_MINUTES = 6 * 60;
+const DAY_END_MINUTES = 22 * 60;
+const DAILY_CAPACITY_MINUTES = DAY_END_MINUTES - DAY_START_MINUTES;
+
+const toDateTimeMs = (date: string, time: string) => new Date(`${date}T${time}:00`).getTime();
+
+const getBookingRange = (booking: Pick<Booking, "date" | "startTime" | "endTime">) => ({
+  startMs: toDateTimeMs(booking.date, booking.startTime),
+  endMs: toDateTimeMs(booking.date, booking.endTime),
+});
+
+const hasTimeOverlap = (
+  source: Pick<Booking, "date" | "startTime" | "endTime">,
+  target: Pick<Booking, "date" | "startTime" | "endTime">
+) => {
+  const sourceRange = getBookingRange(source);
+  const targetRange = getBookingRange(target);
+  return sourceRange.startMs < targetRange.endMs && sourceRange.endMs > targetRange.startMs;
+};
+
+const getBusyMinutes = (dayBookings: Booking[]) => (
+  dayBookings.reduce((total, booking) => {
+    const startMinutes = Math.max(
+      DAY_START_MINUTES,
+      Number.parseInt(booking.startTime.slice(0, 2), 10) * 60 + Number.parseInt(booking.startTime.slice(3, 5), 10)
+    );
+    const endMinutes = Math.min(
+      DAY_END_MINUTES,
+      Number.parseInt(booking.endTime.slice(0, 2), 10) * 60 + Number.parseInt(booking.endTime.slice(3, 5), 10)
+    );
+
+    return total + Math.max(0, endMinutes - startMinutes);
+  }, 0)
+);
+
+const getLoadState = (dayBookings: Booking[]): LoadState => {
+  if (dayBookings.length === 0) return "libre";
+
+  const loadRatio = getBusyMinutes(dayBookings) / DAILY_CAPACITY_MINUTES;
+  if (loadRatio >= 0.7 || dayBookings.length >= 4) return "ocupado";
+  if (loadRatio >= 0.35 || dayBookings.length >= 2) return "medio";
+  return "libre";
+};
 
 
 export default function App() {
@@ -79,6 +127,7 @@ export default function App() {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [selectedTruckId, setSelectedTruckId] = useState<string | null>(null);
+  const [calendarTruckFilterId, setCalendarTruckFilterId] = useState<string | null>(null);
   const [showBookingModal, setShowBookingModal] = useState(false);
   
   // Day Details Modal State
@@ -94,6 +143,7 @@ export default function App() {
         if (!trucksError && trucksData && trucksData.length > 0) {
           setTrucks(trucksData);
           setSelectedTruckId(trucksData[0].id);
+          setCalendarTruckFilterId(trucksData[0].id);
         } else {
           // Fallback initial trucks
           const fallbackTrucks = [
@@ -102,6 +152,7 @@ export default function App() {
           ];
           setTrucks(fallbackTrucks);
           setSelectedTruckId(fallbackTrucks[0].id);
+          setCalendarTruckFilterId(fallbackTrucks[0].id);
         }
 
         // Fetch Bookings from Supabase
@@ -273,6 +324,23 @@ export default function App() {
     setUserSessionId(null);
   };
 
+  const findBookingConflict = useCallback(async (
+    bookingPayload: Pick<Booking, "truckId" | "date" | "startTime" | "endTime">
+  ) => {
+    const { data, error } = await supabase
+      .from("bookings")
+      .select("id, truckId, date, startTime, endTime, user, status, category")
+      .eq("truckId", bookingPayload.truckId)
+      .eq("date", bookingPayload.date);
+
+    if (error) throw error;
+
+    return (data || []).find((booking) => (
+      booking.id !== (editingBookingId || "") &&
+      hasTimeOverlap(bookingPayload, booking as Booking)
+    )) as Booking | undefined;
+  }, [editingBookingId]);
+
   const createBooking = async () => {
     if (!selectedTruckId) return;
     
@@ -296,28 +364,21 @@ export default function App() {
       category: activeModule === "agenda_camion" ? "camion" : "recibo"
     };
 
-    // Global overlap check
-    const conflicting = bookings.find(b => 
-      b.truckId === bookingPayload.truckId && 
-      b.date === bookingPayload.date &&
-      b.id !== (editingBookingId || "") &&
-      ((bookingPayload.startTime >= b.startTime && bookingPayload.startTime < b.endTime) ||
-       (bookingPayload.endTime > b.startTime && bookingPayload.endTime <= b.endTime))
-    );
-
-    if (conflicting) {
-      setConfirmConfig({
-        title: "Conflicto Logístico",
-        message: `El camión ya tiene una tarea asignada de ${conflicting.startTime} a ${conflicting.endTime}.`,
-        onConfirm: () => setShowConfirmModal(false),
-        type: "danger"
-      });
-      setShowConfirmModal(true);
-      return;
-    }
-
     setIsLoading(true);
     try {
+      const conflicting = await findBookingConflict(bookingPayload);
+
+      if (conflicting) {
+        setConfirmConfig({
+          title: "Conflicto Logístico",
+          message: `El camión ya tiene una tarea asignada de ${conflicting.startTime} a ${conflicting.endTime}.`,
+          onConfirm: () => setShowConfirmModal(false),
+          type: "danger"
+        });
+        setShowConfirmModal(true);
+        return;
+      }
+
       if (editingBookingId) {
         const { error } = await supabase.from('bookings').update(bookingPayload).eq('id', editingBookingId);
         if (error) throw error;
@@ -336,7 +397,7 @@ export default function App() {
     }
   };
 
-  const updateStatus = async (bookingId: string, status: "pending" | "in_progress" | "completed") => {
+  const updateStatus = async (bookingId: string, status: BookingStatus) => {
     try {
       await supabase.from('bookings').update({ status }).eq('id', bookingId);
     } catch (e) {
@@ -383,6 +444,30 @@ export default function App() {
     const dateStr = format(selectedDate, "yyyy-MM-dd");
     return bookings.filter(b => b.date === dateStr && b.truckId === selectedTruckId);
   }, [bookings, selectedDate, selectedTruckId]);
+
+  const filteredTruckBookings = useMemo(() => (
+    bookings.filter((booking) => (
+      !calendarTruckFilterId || booking.truckId === calendarTruckFilterId
+    ))
+  ), [bookings, calendarTruckFilterId]);
+
+  const dayDetailBookings = useMemo(() => {
+    if (!selectedDayForDetails) return [];
+
+    const dateStr = format(selectedDayForDetails, "yyyy-MM-dd");
+    const dayManual = bookings.filter((booking) => (
+      booking.date === dateStr && (!calendarTruckFilterId || booking.truckId === calendarTruckFilterId)
+    ));
+    const daySap = sapBookings.filter((booking) => booking.date === dateStr);
+
+    return [...dayManual, ...daySap].sort((a, b) => a.startTime.localeCompare(b.startTime));
+  }, [bookings, sapBookings, selectedDayForDetails, calendarTruckFilterId]);
+
+  const openDayDetails = (day: Date) => {
+    setSelectedDate(day);
+    setSelectedDayForDetails(day);
+    setShowDayDetailsModal(true);
+  };
 
   const timeSlots = useMemo(() => {
     const slots = [];
@@ -575,19 +660,22 @@ export default function App() {
                     {trucks.map(truck => (
                       <button
                         key={truck.id}
-                        onClick={() => setSelectedTruckId(truck.id)}
+                        onClick={() => {
+                          setSelectedTruckId(truck.id);
+                          setCalendarTruckFilterId(truck.id);
+                        }}
                         className={`truck-card flex-shrink-0 snap-start min-w-[210px] p-6 rounded-[2rem] border-2 group ${
-                          selectedTruckId === truck.id 
+                          calendarTruckFilterId === truck.id 
                             ? "selected border-primary bg-primary text-white shadow-xl shadow-primary/20" 
                             : "border-white bg-white text-slate-600 hover:border-slate-200 shadow-md sm:shadow-sm"
                         }`}
                       >
                         <div className="font-extrabold text-base mb-1">{truck.name}</div>
-                        <div className={`text-[10px] font-bold uppercase tracking-widest ${selectedTruckId === truck.id ? "text-white/60" : "text-slate-400"}`}>
+                        <div className={`text-[10px] font-bold uppercase tracking-widest ${calendarTruckFilterId === truck.id ? "text-white/60" : "text-slate-400"}`}>
                           ID: {truck.id}
                         </div>
-                        <div className={`mt-4 w-8 h-8 rounded-lg flex items-center justify-center ${selectedTruckId === truck.id ? "bg-white/20" : "bg-slate-100"}`}>
-                          <div className={`w-1.5 h-1.5 rounded-full ${selectedTruckId === truck.id ? "bg-white" : "bg-slate-400"}`} />
+                        <div className={`mt-4 w-8 h-8 rounded-lg flex items-center justify-center ${calendarTruckFilterId === truck.id ? "bg-white/20" : "bg-slate-100"}`}>
+                          <div className={`w-1.5 h-1.5 rounded-full ${calendarTruckFilterId === truck.id ? "bg-white" : "bg-slate-400"}`} />
                         </div>
                       </button>
                     ))}
@@ -602,8 +690,8 @@ export default function App() {
                         <div className="flex items-center gap-2 mt-2">
                            <span className="text-[10px] text-slate-400 font-black uppercase tracking-[0.15em]">Unidad:</span>
                            <select 
-                             value={selectedTruckId || 'all'} 
-                             onChange={(e) => setSelectedTruckId(e.target.value === 'all' ? null : e.target.value)}
+                             value={calendarTruckFilterId || 'all'} 
+                             onChange={(e) => setCalendarTruckFilterId(e.target.value === 'all' ? null : e.target.value)}
                              className="text-[10px] font-bold border-none bg-slate-100 rounded-md py-1 px-2 focus:ring-0 cursor-pointer"
                            >
                              <option value="all">Todas las Unidades</option>
@@ -633,10 +721,13 @@ export default function App() {
                         const isToday = isSameDay(day, new Date());
                         const isCurrentMonth = isSameMonth(day, currentMonth);
                         const dayStr = format(day, "yyyy-MM-dd");
-                        const dayBookings = bookings.filter(b => 
+                        const dayBookings = filteredTruckBookings.filter(b => 
                           b.date === dayStr && 
-                          (!selectedTruckId || b.truckId === selectedTruckId)
+                          (!calendarTruckFilterId || b.truckId === calendarTruckFilterId)
                         );
+                        const loadState = getLoadState(dayBookings);
+                        const busyMinutes = getBusyMinutes(dayBookings);
+                        const loadPercent = Math.min(100, Math.round((busyMinutes / DAILY_CAPACITY_MINUTES) * 100));
                         
                         const hasPending = dayBookings.some(b => b.status === "pending");
                         const hasCompleted = dayBookings.some(b => b.status === "completed");
@@ -644,16 +735,48 @@ export default function App() {
                         return (
                           <button
                             key={idx}
-                            onClick={() => isCurrentMonth && setSelectedDate(day)}
+                            onClick={() => {
+                              if (!isCurrentMonth) return;
+                              if (window.innerWidth < 1024) {
+                                openDayDetails(day);
+                                return;
+                              }
+                              setSelectedDate(day);
+                            }}
                             className={`
-                              calendar-cell aspect-square flex flex-col items-center justify-center rounded-2xl text-sm relative
+                              calendar-cell aspect-square flex flex-col items-center justify-center rounded-2xl text-sm relative overflow-hidden border-2 border-transparent
                               ${!isCurrentMonth ? "opacity-10 cursor-default" : "cursor-pointer"}
-                              ${isSelected ? "bg-amber-500 text-white shadow-xl shadow-amber-200 scale-105 z-10" : "hover:bg-slate-50 text-slate-700"}
-                              ${isToday && !isSelected ? "border-2 border-amber-500/20 text-amber-600" : ""}
+                              ${isSelected ? "bg-amber-500 text-white shadow-lg shadow-amber-200/70 z-10 border-amber-300/40" : "hover:bg-slate-50 text-slate-700"}
+                              ${isToday && !isSelected ? "border-amber-500/20 text-amber-600" : ""}
                             `}
                             disabled={!isCurrentMonth}
+                            title={`Carga ${loadState}`}
+                            aria-label={`${format(day, "d")} - carga ${loadState}`}
                           >
                             <span className="font-bold">{format(day, "d")}</span>
+                            <div className={`mt-1.5 h-2.5 w-2.5 rounded-full ${
+                              isSelected
+                                ? "bg-white"
+                                : loadState === "ocupado"
+                                  ? "bg-rose-500"
+                                  : loadState === "medio"
+                                    ? "bg-amber-500"
+                                    : "bg-emerald-500"
+                            }`} />
+                            <div className={`mt-1 h-1.5 w-10 rounded-full ${isSelected ? "bg-white/20" : "bg-slate-100"}`}>
+                              <div
+                                className={`h-full rounded-full ${
+                                  isSelected
+                                    ? "bg-white"
+                                    : loadState === "ocupado"
+                                      ? "bg-rose-500"
+                                      : loadState === "medio"
+                                        ? "bg-amber-500"
+                                        : "bg-emerald-500"
+                                }`}
+                                style={{ width: `${Math.max(dayBookings.length > 0 ? 18 : 0, loadPercent)}%` }}
+                              />
+                            </div>
                             <div className="flex gap-1 mt-1">
                               {hasPending && <div className={`w-1 h-1 rounded-full ${isSelected ? "bg-white" : "bg-rose-500"}`} />}
                               {hasCompleted && <div className={`w-1 h-1 rounded-full ${isSelected ? "bg-white/60" : "bg-emerald-500"}`} />}
@@ -664,7 +787,7 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="lg:col-span-7 card p-6 sm:p-8 flex flex-col min-h-[500px]">
+                  <div className="hidden lg:flex lg:col-span-7 card p-6 sm:p-8 flex-col min-h-[500px]">
                     <div className="flex items-start justify-between mb-8 pb-1">
                       <div>
                         <h3 className="font-extrabold text-xl tracking-tight">Agenda del Día</h3>
@@ -771,6 +894,59 @@ export default function App() {
                               </div>
                             </div>
                           ))
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="lg:hidden card p-5 space-y-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <h3 className="font-extrabold text-lg tracking-tight">Detalle rápido</h3>
+                      <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400 mt-1">
+                        {calendarTruckFilterId
+                          ? trucks.find((truck) => truck.id === calendarTruckFilterId)?.name
+                          : "Todas las unidades"}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => openDayDetails(selectedDate)}
+                      className="btn-secondary px-4 py-3 text-[10px] font-black uppercase tracking-[0.18em]"
+                    >
+                      Ver agenda
+                    </button>
+                  </div>
+                  <div className="rounded-[1.5rem] bg-slate-50 border border-slate-100 p-4">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-extrabold capitalize">
+                        {format(selectedDate, "EEEE d 'de' MMMM", { locale: es })}
+                      </span>
+                      <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
+                        {getLoadState(bookingsForSelectedDate)}
+                      </span>
+                    </div>
+                    <div className="mt-3 space-y-2">
+                      {bookingsForSelectedDate.slice(0, 3).map((booking) => (
+                        <div key={booking.id} className="flex items-center justify-between rounded-2xl bg-white px-4 py-3 border border-slate-100">
+                          <div>
+                            <div className="text-sm font-bold text-slate-700">{booking.user}</div>
+                            <div className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">
+                              {booking.startTime} - {booking.endTime}
+                            </div>
+                          </div>
+                          <span className={`text-[10px] font-black uppercase tracking-[0.18em] ${
+                            booking.status === "completed"
+                              ? "text-emerald-600"
+                              : booking.status === "in_progress"
+                                ? "text-primary"
+                                : "text-amber-600"
+                          }`}>
+                            {booking.status === "completed" ? "Completado" : booking.status === "in_progress" ? "En proceso" : "Pendiente"}
+                          </span>
+                        </div>
+                      ))}
+                      {bookingsForSelectedDate.length === 0 && (
+                        <p className="text-center py-5 text-sm font-bold text-slate-400">Sin reservas para este dia.</p>
                       )}
                     </div>
                   </div>
@@ -990,6 +1166,13 @@ export default function App() {
                       <p className="text-xs font-bold opacity-80 uppercase tracking-widest mt-1">
                         {format(selectedDayForDetails, "EEEE d 'de' MMMM", { locale: es })}
                       </p>
+                      {activeModule === "agenda_camion" && (
+                        <p className="text-[10px] font-black uppercase tracking-[0.18em] opacity-70 mt-2">
+                          {calendarTruckFilterId
+                            ? trucks.find((truck) => truck.id === calendarTruckFilterId)?.name
+                            : "Todas las unidades"}
+                        </p>
+                      )}
                     </div>
                     <button onClick={() => setShowDayDetailsModal(false)} className="p-2 hover:bg-white/10 rounded-xl">
                       <X className="w-6 h-6" />
@@ -998,42 +1181,100 @@ export default function App() {
                   
                   <div className="p-6 max-h-[60vh] overflow-y-auto custom-scrollbar bg-slate-50">
                     <div className="space-y-4">
-                      {(() => {
-                        const dateStr = format(selectedDayForDetails!, "yyyy-MM-dd");
-                        const dayManual = bookings.filter(b => b.date === dateStr);
-                        const daySap = sapBookings.filter(b => b.date === dateStr);
-                        const allDay = [...dayManual, ...daySap].sort((a, b) => a.startTime.localeCompare(b.startTime));
-                        
-                        if (allDay.length === 0) {
-                          return <div className="text-center py-10 text-slate-400 font-bold text-sm">No hay agendas programadas</div>;
-                        }
-                        
-                        return allDay.map(b => (
-                          <div key={b.id} className={`bg-white p-4 rounded-2xl border flex items-center gap-4 shadow-sm ${b.isSap ? 'border-amber-100 bg-amber-50/30' : 'border-slate-100'}`}>
-                            <div className={`w-1.5 h-10 rounded-full ${b.status === 'completed' ? 'bg-success' : b.status === 'in_progress' ? 'bg-primary' : 'bg-warning'}`} />
-                            <div className="flex-1">
-                              <div className="flex justify-between items-center">
-                                <span className="font-extrabold text-sm">
-                                  {b.isSap ? `SAP PO #${b.docNum}` : trucks.find(t => t.id === b.truckId)?.name || 'Camión'}
-                                </span>
-                                <span className="text-[10px] font-black text-slate-400">
-                                  {b.isSap ? 'DocDueDate' : `${b.startTime} - ${b.endTime}`}
-                                </span>
+                      {dayDetailBookings.length === 0 ? (
+                        <div className="text-center py-10 text-slate-400 font-bold text-sm">No hay agendas programadas</div>
+                      ) : (
+                        dayDetailBookings.map((b) => (
+                          <div key={b.id} className={`bg-white p-4 rounded-2xl border shadow-sm ${b.isSap ? 'border-amber-100 bg-amber-50/30' : 'border-slate-100'}`}>
+                            <div className="flex items-center gap-4">
+                              <div className={`w-1.5 h-10 rounded-full ${
+                                b.status === 'completed'
+                                  ? 'bg-success'
+                                  : b.status === 'in_progress'
+                                    ? 'bg-primary'
+                                    : 'bg-warning'
+                              }`} />
+                              <div className="flex-1">
+                                <div className="flex justify-between items-center gap-4">
+                                  <span className="font-extrabold text-sm">
+                                    {b.isSap ? `SAP PO #${b.docNum}` : trucks.find((truck) => truck.id === b.truckId)?.name || 'Camión'}
+                                  </span>
+                                  <span className="text-[10px] font-black text-slate-400">
+                                    {b.isSap ? 'DocDueDate' : `${b.startTime} - ${b.endTime}`}
+                                  </span>
+                                </div>
+                                <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1">
+                                  {b.isSap ? poTitle(b.user) : `Ref: ${b.user}`}
+                                </div>
                               </div>
-                              <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1">
-                                {b.isSap ? poTitle(b.user) : `Ref: ${b.user}`}
-                              </div>
+                              {b.isSap && (
+                                <Database className="w-4 h-4 text-amber-500 ml-auto" />
+                              )}
                             </div>
-                            {b.isSap && (
-                              <Database className="w-4 h-4 text-amber-500 ml-auto" />
+
+                            {!b.isSap && activeModule === "agenda_camion" && (
+                              <div className="mt-4 flex items-center justify-end gap-2">
+                                {role === "agendador" && b.status !== "completed" && (
+                                  <>
+                                    <button
+                                      onClick={() => {
+                                        setShowDayDetailsModal(false);
+                                        openEditModal(b);
+                                      }}
+                                      className="rounded-xl border border-slate-200 px-3 py-2 text-[10px] font-black uppercase tracking-[0.18em] text-slate-500 hover:text-primary hover:border-primary/20"
+                                    >
+                                      Editar
+                                    </button>
+                                    <button
+                                      onClick={() => {
+                                        setShowDayDetailsModal(false);
+                                        deleteBooking(b.id);
+                                      }}
+                                      className="rounded-xl border border-red-100 bg-red-50 px-3 py-2 text-[10px] font-black uppercase tracking-[0.18em] text-red-500"
+                                    >
+                                      Eliminar
+                                    </button>
+                                  </>
+                                )}
+                                {role === "chofer" && b.status === "pending" && (
+                                  <button
+                                    onClick={() => updateStatus(b.id, "in_progress")}
+                                    className="rounded-xl bg-primary px-3 py-2 text-[10px] font-black uppercase tracking-[0.18em] text-white"
+                                  >
+                                    Iniciar
+                                  </button>
+                                )}
+                                {role === "chofer" && b.status === "in_progress" && (
+                                  <button
+                                    onClick={() => updateStatus(b.id, "completed")}
+                                    className="rounded-xl bg-success px-3 py-2 text-[10px] font-black uppercase tracking-[0.18em] text-white"
+                                  >
+                                    Finalizar
+                                  </button>
+                                )}
+                              </div>
                             )}
                           </div>
-                        ));
-                      })()}
+                        ))
+                      )}
                     </div>
                   </div>
                   <div className="p-4 border-t border-slate-100 bg-white">
-                    <button onClick={() => setShowDayDetailsModal(false)} className="w-full py-4 text-xs font-black uppercase tracking-[0.2em] text-slate-400 hover:text-slate-600 transition-colors">Cerrar Ventana</button>
+                    <div className="flex gap-3">
+                      {role === "agendador" && activeModule === "agenda_camion" && (
+                        <button
+                          onClick={() => {
+                            setSelectedDate(selectedDayForDetails);
+                            setShowDayDetailsModal(false);
+                            setShowBookingModal(true);
+                          }}
+                          className="btn-primary flex-1 py-4 text-xs font-black uppercase tracking-[0.2em]"
+                        >
+                          Nueva agenda
+                        </button>
+                      )}
+                      <button onClick={() => setShowDayDetailsModal(false)} className="flex-1 py-4 text-xs font-black uppercase tracking-[0.2em] text-slate-400 hover:text-slate-600 transition-colors">Cerrar Ventana</button>
+                    </div>
                   </div>
                 </motion.div>
               </div>

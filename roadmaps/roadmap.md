@@ -15,11 +15,11 @@ La aplicación se divide en dos pilares fundamentales:
 - [x] **UI Responsiva:** Adaptación para móviles y Escritorio (Header optimizado y touch targets de 48px).
 - [x] **Infraestructura Supabase:** Configuración de `supabase-js`, Auth Login híbrido y Realtime DB.
 
-## 🕒 Fase 2: Disponibilidad Avanzada & UX Detalle (En Proceso)
-- [ ] **Lógica de Conflictos:** Querys de Supabase con validación de solapamiento en milisegundos.
-- [ ] **Indicador de Carga:** Visualización en el calendario de la disponibilidad diaria del camión (Libre/Medio/Ocupado).
-- [ ] **Detalle en Móvil:** Implementación de vistas de detalle mejoradas (Bottom Sheets) para evitar navegación profunda.
-- [ ] **Filtros Rápidos:** Capacidad de filtrar el calendario por unidad de transporte específica.
+## ✅ Fase 2: Disponibilidad Avanzada & UX Detalle (Completado)
+- [x] **Lógica de Conflictos:** Querys de Supabase con validación de solapamiento en milisegundos.
+- [x] **Indicador de Carga:** Visualización en el calendario de la disponibilidad diaria del camión (Libre/Medio/Ocupado).
+- [x] **Detalle en Móvil:** Implementación de vistas de detalle mejoradas (Bottom Sheets) para evitar navegación profunda.
+- [x] **Filtros Rápidos:** Capacidad de filtrar el calendario por unidad de transporte específica.
 
 ## 📦 Fase 3: Integración SAP B1 (Agenda de Recibo)
 - [ ] **Sincronización de OC:** Configurar el endpoint para traer Ordenes de Compra (`OPCH` o `POR1`) desde el Service Layer.
