@@ -1,17 +1,22 @@
-import { useState, useEffect, useCallback, FormEvent, useMemo } from "react";
-import { 
+import React, { useState, useEffect, useCallback, useMemo } from "react";
+import {
   Truck, User, Clock, CheckCircle2, LogOut, Shield,
   Calendar as CalendarIcon, ChevronLeft, ChevronRight, Plus, X, Server, Database, Lock,
-  Trash2, Edit, AlertTriangle, Mail, Phone, MessageCircle
+  Trash2, Edit, AlertTriangle, Mail, Phone, MessageCircle, Globe
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import { 
-  format, addMonths, subMonths, startOfMonth, endOfMonth, 
-  startOfWeek, endOfWeek, eachDayOfInterval, isSameMonth, 
-  isSameDay, parse, addMinutes, isBefore, getDay
+import {
+  format, addMonths, subMonths, startOfMonth, endOfMonth,
+  startOfWeek, endOfWeek, eachDayOfInterval, isSameMonth,
+  isSameDay, isToday, parse, addMinutes, isBefore, getDay
 } from "date-fns";
 import { es } from "date-fns/locale";
 import { supabase } from "./lib/supabase";
+import Header from "./components/layout/Header";
+import Sidebar from "./components/layout/Sidebar";
+import MainContent from "./components/layout/MainContent";
+import MonthView from "./components/calendar/MonthView";
+import WeekView from "./components/calendar/WeekView";
 
 // Utility: truncate long supplier names from SAP
 const poTitle = (name: string) => name?.length > 30 ? name.substring(0, 28) + "…" : (name || "Proveedor SAP");
@@ -37,7 +42,7 @@ interface Booking {
 }
 
 type Role = "chofer" | "agendador" | null;
-type Module = "agenda_camion" | "agenda_recibo";
+type Module = "agenda_camion" | "agenda_recibo" | "asistente_recibo";
 type BookingStatus = Booking["status"];
 type LoadState = "libre" | "medio" | "ocupado";
 type ReceiptFilterMode = "open" | "relevant" | "all";
@@ -99,9 +104,152 @@ const getLoadState = (dayBookings: Booking[]): LoadState => {
 };
 
 
+const AnimatedBackground = () => (
+  <div className="fixed inset-0 z-0 overflow-hidden pointer-events-none">
+    <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-primary/[0.03] rounded-full blur-[120px]" />
+    <div className="absolute bottom-[-10%] right-[-10%] w-[45%] h-[45%] bg-primary/[0.05] rounded-full blur-[130px]" />
+    <div className="absolute top-[20%] right-[10%] w-[30%] h-[30%] bg-primary/[0.02] rounded-full blur-[100px]" />
+  </div>
+);
+
+const GlassContainer = ({ children, className = "" }: { children: React.ReactNode; className?: string }) => (
+  <div className={`bg-white/95 backdrop-blur-md border border-border rounded-[3rem] shadow-soft ${className}`}>
+    {children}
+  </div>
+);
+
+
+const LoginScreen = ({ onLogin, loading, error, sl, setSl, db, setDb, user, setUser, pass, setPass }: any) => (
+  <div className="min-h-screen bg-background flex flex-col relative overflow-hidden font-sans">
+    <AnimatedBackground />
+    <div className="flex-1 flex items-center justify-center p-6 relative z-10 w-full max-w-xl mx-auto">
+      <div className="w-full flex flex-col justify-center gap-8 py-10 animate-fade-up">
+        <div className="flex flex-col items-center gap-8 mb-4 text-center">
+          <div className="p-6 bg-primary rounded-[3rem] shadow-2xl shadow-primary/30 transform hover:rotate-3 transition-transform duration-500">
+            <Truck className="w-14 h-14 text-white" />
+          </div>
+          <div className="space-y-3">
+            <h1 className="text-5xl font-black tracking-tighter text-text uppercase leading-none">Galipote <span className="text-primary">Logistics</span></h1>
+            <p className="text-[11px] font-black text-text-muted uppercase tracking-[0.4em] opacity-70">SAP Business One Suite v2.4</p>
+          </div>
+        </div>
+
+        <GlassContainer className="p-10 sm:p-12 border-primary/10 shadow-lg">
+          <form 
+            onSubmit={(e) => { e.preventDefault(); onLogin(); }}
+            className="space-y-8"
+          >
+            <div className="space-y-6">
+              <div className="space-y-3">
+                <label className="text-[11px] font-black uppercase tracking-widest text-text-muted ml-1 italic opacity-70">Service Layer Endpoint</label>
+                <div className="relative group">
+                  <div className="absolute left-5 top-1/2 -translate-y-1/2 p-2 bg-gray-100 rounded-xl group-focus-within:bg-primary/10 group-focus-within:text-primary transition-all">
+                    <Globe className="w-4 h-4 text-gray-400 group-focus-within:text-primary" />
+                  </div>
+                  <input
+                    type="url"
+                    value={sl}
+                    onChange={(e) => setSl(e.target.value)}
+                    className="w-full pl-16 pr-6 py-5 rounded-2xl border-2 border-border bg-gray-50 focus:bg-white focus:border-primary focus:ring-8 focus:ring-primary/5 transition-all font-black text-sm text-text placeholder:text-gray-300 outline-none"
+                    placeholder="https://sap-server:50000/b1s/v1"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                <div className="space-y-3">
+                  <label className="text-[11px] font-black uppercase tracking-widest text-text-muted ml-1 italic opacity-70">Company DB</label>
+                  <div className="relative group">
+                    <div className="absolute left-5 top-1/2 -translate-y-1/2 p-2 bg-gray-100 rounded-xl group-focus-within:bg-primary/10 group-focus-within:text-primary transition-all">
+                      <Database className="w-4 h-4 text-gray-400 group-focus-within:text-primary" />
+                    </div>
+                    <input
+                      type="text"
+                      value={db}
+                      onChange={(e) => setDb(e.target.value)}
+                      className="w-full pl-16 pr-6 py-5 rounded-2xl border-2 border-border bg-gray-50 focus:bg-white focus:border-primary outline-none transition-all font-black text-sm text-text placeholder:text-gray-300"
+                      placeholder="SBO_PROD"
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <label className="text-[11px] font-black uppercase tracking-widest text-text-muted ml-1 italic opacity-70">B1 User</label>
+                  <div className="relative group">
+                    <div className="absolute left-5 top-1/2 -translate-y-1/2 p-2 bg-gray-100 rounded-xl group-focus-within:bg-primary/10 group-focus-within:text-primary transition-all">
+                      <User className="w-4 h-4 text-gray-400 group-focus-within:text-primary" />
+                    </div>
+                    <input
+                      type="text"
+                      value={user}
+                      onChange={(e) => setUser(e.target.value)}
+                      className="w-full pl-16 pr-6 py-5 rounded-2xl border-2 border-border bg-gray-50 focus:bg-white focus:border-primary outline-none transition-all font-black text-sm text-text placeholder:text-gray-300"
+                      placeholder="manager"
+                      required
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <label className="text-[11px] font-black uppercase tracking-widest text-text-muted ml-1 italic opacity-70">Password</label>
+                <div className="relative group">
+                  <div className="absolute left-5 top-1/2 -translate-y-1/2 p-2 bg-gray-100 rounded-xl group-focus-within:bg-primary/10 group-focus-within:text-primary transition-all">
+                    <Lock className="w-4 h-4 text-gray-400 group-focus-within:text-primary" />
+                  </div>
+                  <input
+                    type="password"
+                    value={pass}
+                    onChange={(e) => setPass(e.target.value)}
+                    className="w-full pl-16 pr-6 py-5 rounded-2xl border-2 border-border bg-gray-50 focus:bg-white focus:border-primary outline-none transition-all font-black text-sm text-text placeholder:text-gray-300"
+                    placeholder="••••••••"
+                    required
+                  />
+                </div>
+              </div>
+            </div>
+
+            <button 
+              type="submit"
+              disabled={loading}
+              className="w-full py-5 rounded-2xl bg-primary text-white text-[13px] font-black uppercase tracking-[0.2em] shadow-2xl shadow-primary/40 hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-3 disabled:opacity-70 disabled:grayscale"
+            >
+              {loading ? (
+                <div className="flex items-center gap-3">
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  <span>Sincronizando...</span>
+                </div>
+              ) : (
+                <>Ingresar al Panel <ChevronRight className="w-5 h-5" /></>
+              )}
+            </button>
+
+            {error && (
+              <div className="p-5 bg-red-50 border-2 border-red-100 rounded-2xl text-red-600 text-center animate-shake">
+                <p className="text-[11px] font-black uppercase tracking-widest leading-relaxed">{error}</p>
+              </div>
+            )}
+          </form>
+        </GlassContainer>
+        
+        <div className="flex flex-col items-center gap-2 opacity-40">
+          <p className="text-center text-[10px] font-black uppercase tracking-[0.4em] text-text-muted">
+            Desarrollado por Galipote Tech
+          </p>
+          <div className="h-1 w-12 bg-primary/30 rounded-full" />
+        </div>
+      </div>
+    </div>
+  </div>
+);
+
 export default function App() {
   const [role, setRole] = useState<Role>(null);
-  const [activeModule, setActiveModule] = useState<Module>("agenda_camion");
+  const [activeModule, setActiveModule] = useState<Module>(
+    (localStorage.getItem("active_module") as Module) || "agenda_camion"
+  );
   const [userName, setUserName] = useState("");
   const [password, setPassword] = useState("");
   const [serviceLayer, setServiceLayer] = useState(localStorage.getItem("sap_url") || "");
@@ -117,6 +265,7 @@ export default function App() {
   // New Booking State
   const [startTime, setStartTime] = useState("08:00");
   const [endTime, setEndTime] = useState("09:00");
+  const [bookingUser, setBookingUser] = useState("");
 
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -141,7 +290,28 @@ export default function App() {
   const [selectedTruckId, setSelectedTruckId] = useState<string | null>(null);
   const [calendarTruckFilterId, setCalendarTruckFilterId] = useState<string | null>(null);
   const [showBookingModal, setShowBookingModal] = useState(false);
-  
+
+  // New Google Calendar Style States
+  const [viewMode, setViewMode] = useState<"month" | "week" | "day">(
+    (localStorage.getItem("view_mode") as any) || "month"
+  );
+  const [showSidebar, setShowSidebar] = useState(
+    localStorage.getItem("show_sidebar") !== "false"
+  );
+
+  // Persistence Effects
+  useEffect(() => {
+    localStorage.setItem("view_mode", viewMode);
+  }, [viewMode]);
+
+  useEffect(() => {
+    localStorage.setItem("active_module", activeModule);
+  }, [activeModule]);
+
+  useEffect(() => {
+    localStorage.setItem("show_sidebar", String(showSidebar));
+  }, [showSidebar]);
+
   // Day Details Modal State
   const [showDayDetailsModal, setShowDayDetailsModal] = useState(false);
   const [selectedDayForDetails, setSelectedDayForDetails] = useState<Date | null>(null);
@@ -256,8 +426,7 @@ export default function App() {
     };
   }, []);
 
-  const handleLogin = async (e: FormEvent) => {
-    e.preventDefault();
+  const handleLogin = async () => {
     setErrorMessage(null);
     setIsLoading(true);
 
@@ -490,818 +659,447 @@ export default function App() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-[var(--color-bg-main)] flex flex-col font-sans text-gray-900 pb-20 lg:pb-0 selection:bg-primary/20">
+    <div className="min-h-screen bg-background flex flex-col font-sans text-text pb-20 lg:pb-0">
       {!isLoggedIn ? (
-        <div className="flex-1 flex items-center justify-center p-4 relative overflow-hidden">
-          {/* Animated Background Elements - Optimized for Performance */}
-          <div className="absolute top-0 left-0 w-full h-full overflow-hidden -z-10 pointer-events-none opacity-50">
-            <div className="absolute -top-[10%] -left-[10%] w-[40%] h-[40%] bg-primary/20 rounded-full blur-[80px] animate-pulse" style={{ willChange: 'transform, opacity' }} />
-            <div className="absolute top-[20%] -right-[10%] w-[35%] h-[35%] bg-blue-400/20 rounded-full blur-[60px] animate-pulse" style={{ animationDelay: '1s', willChange: 'transform, opacity' }} />
-            <div className="absolute -bottom-[10%] left-[20%] w-[30%] h-[30%] bg-indigo-400/20 rounded-full blur-[70px] animate-pulse" style={{ animationDelay: '2s', willChange: 'transform, opacity' }} />
+        <LoginScreen 
+          onLogin={handleLogin}
+          loading={isLoading}
+          error={errorMessage}
+          sl={serviceLayer}
+          setSl={setServiceLayer}
+          db={database}
+          setDb={setDatabase}
+          user={userName}
+          setUser={setUserName}
+          pass={password}
+          setPass={setPassword}
+        />
+      ) : (
+        <div className="flex flex-col h-screen bg-background text-text">
+          <Header
+            userName={userName}
+            role={role}
+            currentMonth={currentMonth}
+            activeModule={activeModule}
+            viewMode={viewMode}
+            onViewModeChange={setViewMode}
+            onPrevMonth={prevMonth}
+            onNextMonth={nextMonth}
+            onToday={() => setSelectedDate(new Date())}
+            onToggleSidebar={() => setShowSidebar(!showSidebar)}
+            onLogout={handleLogout}
+            setActiveModule={setActiveModule}
+          />
+          <div className="flex flex-1 overflow-hidden">
+            <AnimatePresence>
+              {showSidebar && (
+                <motion.div
+                  initial={{ width: 0, opacity: 0 }}
+                  animate={{ width: 320, opacity: 1 }}
+                  exit={{ width: 0, opacity: 0 }}
+                  transition={{ duration: 0.2 }}
+                  className="overflow-hidden"
+                >
+                  <Sidebar
+                    selectedDate={selectedDate}
+                    setSelectedDate={setSelectedDate}
+                    activeModule={activeModule}
+                    isSidebarOpen={showSidebar}
+                  />
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Main Content */}
+            <MainContent showSidebar={showSidebar}>
+              <div className="flex-1 flex flex-col overflow-hidden h-full">
+                {viewMode === "month" && (
+                  <MonthView
+                    currentMonth={currentMonth}
+                    days={days}
+                    bookings={activeModule === "agenda_camion" ? filteredTruckBookings : bookings.filter(b => b.category === "recibo")}
+                    sapBookings={activeModule === "agenda_camion" ? [] : sapBookings}
+                    onDayClick={openDayDetails}
+                    selectedDate={selectedDate}
+                  />
+                )}
+
+                {viewMode === "week" && (
+                  <WeekView
+                    selectedDate={selectedDate}
+                    bookings={activeModule === "agenda_camion" ? filteredTruckBookings : bookings.filter(b => b.category === "recibo")}
+                    sapBookings={activeModule === "agenda_camion" ? [] : sapBookings}
+                    onDayClick={(day) => {
+                      setSelectedDate(day);
+                      setViewMode("day");
+                    }}
+                  />
+                )}
+
+                {viewMode === "day" && (
+                  <div className="flex-1 flex flex-col min-h-0 bg-background transition-all duration-300 relative overflow-hidden">
+                    <div className="absolute inset-x-0 h-20 bg-gradient-to-b from-surface/20 to-transparent pointer-events-none z-10" />
+                    {/* Day View Header — Google Calendar Style */}
+                    <div className="flex-none pt-8 pb-4 border-b border-border bg-surface/80 backdrop-blur-md sticky top-0 z-30">
+                      <div className="flex items-start">
+                        {/* Empty corner for time column alignment */}
+                        <div className="w-20 flex-none" />
+                        
+                        <div className="flex-1 px-4 flex items-center justify-between">
+                          <div className="flex items-center gap-6">
+                            <div className="flex flex-col items-center">
+                              <span className="text-[10px] font-black uppercase tracking-[0.2em] text-primary mb-1">
+                                {format(selectedDate, "MMM", { locale: es })}
+                              </span>
+                              <div className={`w-12 h-12 flex items-center justify-center rounded-full text-2xl font-black transition-all ${
+                                isToday(selectedDate) 
+                                  ? "bg-primary text-white shadow-lg shadow-primary/30" 
+                                  : "text-text"
+                              }`}>
+                                {format(selectedDate, "d")}
+                              </div>
+                            </div>
+                            
+                            <div className="h-12 w-px bg-border mx-2" />
+                            
+                            <div>
+                              <h2 className="text-2xl font-black text-text capitalize tracking-tighter">
+                                {format(selectedDate, "EEEE", { locale: es })}
+                              </h2>
+                              <div className="flex items-center gap-2 mt-0.5">
+                                <span className={`w-2 h-2 rounded-full ${activeModule === "agenda_camion" ? "bg-primary" : "bg-warning"}`} />
+                                <span className="text-[10px] font-black uppercase tracking-[0.2em] text-text-muted">
+                                  {activeModule === "agenda_camion" ? "Agenda de Camiones" : "Logística SAP"}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {role === "agendador" && activeModule === "agenda_camion" && (
+                            <button
+                              onClick={() => setShowBookingModal(true)}
+                              className="btn-primary flex items-center gap-2.5 px-8 py-3.5 rounded-2xl shadow-2xl shadow-primary/30 active:scale-95 transition-all text-[11px] font-black uppercase tracking-[0.2em]"
+                            >
+                              <Plus className="w-4 h-4" />
+                              Programar
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Hourly Grid Scrollable Area */}
+                    <div className="flex-1 overflow-y-auto custom-scrollbar bg-background relative">
+                      <div className="flex min-w-[600px] h-[1440px] relative">
+                        {/* Time Column */}
+                        <div className="w-20 border-r border-border flex-none bg-background/50 z-10">
+                          {Array.from({ length: 24 }).map((_, i) => (
+                            <div key={i} className="h-[60px] relative">
+                              <span className="absolute -top-2.5 right-4 text-[11px] font-bold text-text-muted uppercase tracking-tighter">
+                                {i === 0 ? "12 AM" : i < 12 ? `${i} AM` : i === 12 ? "12 PM" : `${i - 12} PM`}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Grid and Events Area */}
+                        <div className="flex-1 relative bg-white">
+                          {/* Horizontal grid lines */}
+                          {Array.from({ length: 24 }).map((_, i) => (
+                            <div key={i} className="h-[60px] border-b border-border/60 w-full" />
+                          ))}
+
+                          {/* Current Time Indicator */}
+                          {isToday(selectedDate) && (
+                            <div
+                               className="absolute left-0 right-0 z-20 pointer-events-none"
+                               style={{ top: `${new Date().getHours() * 60 + new Date().getMinutes()}px` }}
+                            >
+                              <div className="h-[2px] bg-red-500 w-full relative">
+                                <div className="absolute -left-1 -top-1 w-2.5 h-2.5 bg-red-500 rounded-full shadow-md" />
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Bookings / Events */}
+                          <div className="absolute inset-0">
+                            {dayDetailBookings.map((booking) => {
+                              const [h, m] = booking.startTime.split(":").map(Number);
+                              const [eh, em] = booking.endTime.split(":").map(Number);
+                              const top = h * 60 + m;
+                              const height = Math.max(eh * 60 + em - top, 32);
+                              const isSap = (booking as any).isSap;
+                              const isCompleted = booking.status === "completed";
+
+                              return (
+                                <motion.div
+                                  key={booking.id}
+                                  initial={{ opacity: 0, scale: 0.98 }}
+                                  animate={{ opacity: 1, scale: 1 }}
+                                  onClick={() => !isSap && openEditModal(booking)}
+                                  className={`
+                                    absolute left-2.5 right-6 p-4 rounded-3xl border-l-[8px] shadow-xl cursor-pointer group transition-all hover:z-30 hover:scale-[1.02] flex flex-col justify-between 
+                                    ${isSap
+                                      ? "bg-amber-50 border-amber-500 shadow-amber-900/10 shadow-sm"
+                                      : booking.status === "completed"
+                                      ? "bg-emerald-50 border-emerald-500 opacity-60 shadow-emerald-900/5 shadow-sm"
+                                      : "bg-white border-primary shadow-primary/10 hover:shadow-primary/20"}
+                                    ${isCompleted ? "opacity-40 grayscale scale-95" : "font-black tracking-tight"}
+                                  `}
+                                  style={{ top: `${top}px`, height: `${height}px` }}
+                                >
+                                  <div>
+                                    <div className="flex items-center justify-between mb-2">
+                                      <div className="flex items-center gap-2">
+                                        <Clock className={`w-3.5 h-3.5 ${isSap ? "text-amber-600" : "text-primary opacity-60"}`} />
+                                        <span className={`text-[11px] font-black uppercase tracking-widest ${
+                                          isSap ? "text-amber-700" : isCompleted ? "text-emerald-700" : "text-primary"
+                                        }`}>
+                                          {booking.startTime} - {booking.endTime}
+                                        </span>
+                                      </div>
+                                      <div className={`w-2.5 h-2.5 rounded-full shadow-sm ${
+                                        booking.status === "completed" ? "bg-emerald-500 ring-2 ring-emerald-100" : booking.status === "in_progress" ? "bg-primary ring-2 ring-blue-100" : "bg-amber-500 ring-2 ring-amber-100"
+                                      }`} />
+                                    </div>
+                                    <h4 className={`text-base font-black truncate leading-tight uppercase tracking-tight ${
+                                      booking.isSap ? "text-amber-950" : booking.status === "completed" ? "text-emerald-950" : "text-text"
+                                    }`}>
+                                      {booking.isSap ? `ORDEN #${booking.docNum}` : booking.user}
+                                    </h4>
+                                    <p className={`text-[11px] font-black mt-1.5 truncate uppercase tracking-[0.1em] opacity-60 ${
+                                      booking.isSap ? "text-amber-800" : booking.status === "completed" ? "text-emerald-800" : "text-text-muted"
+                                    }`}>
+                                      {booking.isSap
+                                        ? poTitle(booking.user)
+                                        : trucks.find((t) => t.id === booking.truckId)?.name || "Transporte Programado"}
+                                    </p>
+                                  </div>
+
+                                  {/* Quick Actions for Chauffeurs */}
+                                  {role === "chofer" && !booking.isSap && booking.status !== "completed" && (
+                                    <div className="absolute bottom-3 right-3 flex gap-2">
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          updateStatus(
+                                            booking.id,
+                                            booking.status === "pending" ? "in_progress" : "completed"
+                                          );
+                                        }}
+                                        className="p-2 px-5 bg-primary text-white text-[10px] font-black uppercase tracking-widest rounded-xl shadow-lg shadow-primary/30 active:scale-95 transition-all"
+                                      >
+                                        {booking.status === "pending" ? "Iniciar" : "Terminar"}
+                                      </button>
+                                    </div>
+                                  )}
+                                </motion.div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </MainContent>
           </div>
 
-          <motion.div 
-            initial={{ opacity: 0, y: 20, scale: 0.98 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            transition={{ duration: 0.4, ease: [0.23, 1, 0.32, 1] }}
-            style={{ willChange: 'transform, opacity' }}
-            className="glass w-full max-w-md p-8 sm:p-10 rounded-[2rem] shadow-2xl relative"
-          >
-            <div className="flex flex-col items-center mb-10">
-              <div className="bg-primary shadow-xl shadow-primary/30 p-4 rounded-2xl mb-6 transform rotate-3 hover:rotate-0 transition-transform duration-500">
-                <Truck className="w-10 h-10 text-white" />
-              </div>
-              <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">AGENDAO SB1</h1>
-              <p className="text-slate-500 font-medium text-sm text-center mt-2 px-6">Accede al sistema de logística conectando con SAP Service Layer</p>
-            </div>
-
-            <form onSubmit={handleLogin} className="space-y-5">
-              <div className="space-y-1.5">
-                <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 ml-1">Service Layer URL</label>
-                <div className="relative group">
-                  <Server className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-primary transition-colors" />
-                  <input
-                    type="url"
-                    value={serviceLayer}
-                    onChange={(e) => setServiceLayer(e.target.value)}
-                    className="w-full pl-12 pr-4 py-3.5 rounded-2xl border border-slate-200 bg-white/50 focus:bg-white focus:ring-4 focus:ring-primary/10 focus:border-primary outline-none transition-all text-sm font-medium"
-                    placeholder="https://servidor:50000/b1s/v1"
-                    required
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 ml-1">Base de Datos</label>
-                <div className="relative group">
-                  <Database className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-primary transition-colors" />
-                  <input
-                    type="text"
-                    value={database}
-                    onChange={(e) => setDatabase(e.target.value)}
-                    className="w-full pl-12 pr-4 py-3.5 rounded-2xl border border-slate-200 bg-white/50 focus:bg-white focus:ring-4 focus:ring-primary/10 focus:border-primary outline-none transition-all text-sm font-medium"
-                    placeholder="SBO_COMPANY_DB"
-                    required
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 ml-1">Usuario</label>
-                  <div className="relative group">
-                    <User className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-primary transition-colors" />
-                    <input
-                      type="text"
-                      value={userName}
-                      onChange={(e) => setUserName(e.target.value)}
-                      className="w-full pl-12 pr-4 py-3.5 rounded-2xl border border-slate-200 bg-white/50 focus:bg-white focus:ring-4 focus:ring-primary/10 focus:border-primary outline-none transition-all text-sm font-medium"
-                      placeholder="manager"
-                      required
-                    />
-                  </div>
-                </div>
-                <div className="space-y-1.5">
-                  <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 ml-1">Contraseña</label>
-                  <div className="relative group">
-                    <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-primary transition-colors" />
-                    <input
-                      type="password"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      className="w-full pl-12 pr-4 py-3.5 rounded-2xl border border-slate-200 bg-white/50 focus:bg-white focus:ring-4 focus:ring-primary/10 focus:border-primary outline-none transition-all text-sm font-medium"
-                      placeholder="••••••••"
-                      required
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <button
-                type="submit"
-                disabled={isLoading}
-                className="btn-primary w-full py-4 mt-6 flex items-center justify-center gap-3 overflow-hidden relative group"
-              >
-                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full group-hover:animate-[shimmer_1.5s_infinite]" />
-                {isLoading ? (
-                  <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                ) : (
-                  <>
-                    <span className="relative z-10">Conectar con SAP B1</span>
-                    <ChevronRight className="w-5 h-5 relative z-10 transition-transform group-hover:translate-x-1" />
-                  </>
-                )}
-              </button>
-              {errorMessage && (
-                <p className="text-sm font-semibold text-red-600 mt-3 px-1">
-                  {errorMessage}
-                </p>
-              )}
-            </form>
-
-            <div className="mt-6 pt-4 border-t border-white/20 text-center">
-              <button
-                type="button"
-                onClick={() => setShowContactModal(true)}
-                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white/70 px-4 py-2 text-[11px] font-bold text-slate-600 hover:border-primary/30 hover:text-primary transition-all"
-              >
-                <MessageCircle className="w-4 h-4" />
-                Contacto de soporte
-              </button>
-            </div>
-          </motion.div>
-        </div>
-      ) : (
-        <>
-          <header className="bg-white/80 backdrop-blur-md border-b border-slate-200 sticky top-0 z-40 transition-all">
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 sm:h-20 flex items-center justify-between">
-              <div className="flex items-center gap-8">
-                <div className="flex items-center gap-3">
-                  <div className="bg-primary p-2 rounded-xl shadow-lg shadow-primary/20">
-                    <Truck className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="font-bold text-base sm:text-lg leading-tight tracking-tight">AGENDAO SB1</span>
-                    <span className="text-[10px] sm:text-[11px] font-bold text-primary uppercase tracking-widest opacity-80">Logística & Control</span>
-                  </div>
-                </div>
-                
-                <nav className="hidden lg:flex items-center bg-slate-100 p-1 rounded-xl">
-                  <button 
-                    onClick={() => setActiveModule("agenda_camion")}
-                    className={`px-5 py-2 rounded-lg text-sm font-bold transition-all ${
-                      activeModule === "agenda_camion" ? "bg-white text-primary shadow-sm" : "text-slate-500 hover:text-slate-700"
-                    }`}
-                  >
-                    Agenda de Camiones
-                  </button>
-                  <button 
-                    onClick={() => setActiveModule("agenda_recibo")}
-                    className={`px-5 py-2 rounded-lg text-sm font-bold transition-all ${
-                      activeModule === "agenda_recibo" ? "bg-white text-primary shadow-sm" : "text-slate-500 hover:text-slate-700"
-                    }`}
-                  >
-                    Agenda de Recibo
-                  </button>
-                </nav>
-              </div>
-
-              <div className="flex items-center gap-3 sm:gap-5">
-                <div className="hidden sm:flex flex-col items-end">
-                  <span className="text-sm font-bold text-slate-900">{userName}</span>
-                  <div className="flex items-center gap-1.5 mt-0.5">
-                    <div className={`w-1.5 h-1.5 rounded-full ${role === 'chofer' ? 'bg-amber-500' : 'bg-emerald-500'}`} />
-                    <span className="text-[10px] uppercase font-extrabold text-slate-500 tracking-wider">
-                      {role === "chofer" ? "Chofer" : "Agendador"}
-                    </span>
-                  </div>
-                </div>
-                <div className="h-8 w-[1px] bg-slate-200 hidden sm:block" />
-                <button 
-                  onClick={handleLogout}
-                  className="p-2.5 sm:p-3 bg-red-50 text-red-500 hover:bg-red-500 hover:text-white rounded-xl transition-all shadow-sm active:scale-95 group"
-                >
-                  <LogOut className="w-5 h-5 transition-transform group-hover:-translate-x-0.5" />
-                </button>
-              </div>
-            </div>
-          </header>
-
-          <main className="max-w-7xl mx-auto p-4 sm:p-6 mt-4 pb-24 lg:pb-12">
-            {activeModule === "agenda_camion" ? (
-              <div className="flex flex-col gap-6 animate-fade-in">
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between px-1">
-                    <h2 className="text-xs font-black flex items-center gap-2 text-slate-400 uppercase tracking-[0.2em]">
-                      <Truck className="w-4 h-4" /> SELECCIONAR UNIDAD
-                    </h2>
-                  </div>
-                  <div className="flex overflow-x-auto gap-4 pb-4 custom-scrollbar snap-x">
-                    {trucks.map(truck => (
-                      <button
-                        key={truck.id}
-                        onClick={() => {
-                          setSelectedTruckId(truck.id);
-                          setCalendarTruckFilterId(truck.id);
-                        }}
-                        className={`truck-card flex-shrink-0 snap-start min-w-[210px] p-6 rounded-[2rem] border-2 group ${
-                          calendarTruckFilterId === truck.id 
-                            ? "selected border-primary bg-primary text-white shadow-xl shadow-primary/20" 
-                            : "border-white bg-white text-slate-600 hover:border-slate-200 shadow-md sm:shadow-sm"
-                        }`}
-                      >
-                        <div className="font-extrabold text-base mb-1">{truck.name}</div>
-                        <div className={`text-[10px] font-bold uppercase tracking-widest ${calendarTruckFilterId === truck.id ? "text-white/60" : "text-slate-400"}`}>
-                          ID: {truck.id}
-                        </div>
-                        <div className={`mt-4 w-8 h-8 rounded-lg flex items-center justify-center ${calendarTruckFilterId === truck.id ? "bg-white/20" : "bg-slate-100"}`}>
-                          <div className={`w-1.5 h-1.5 rounded-full ${calendarTruckFilterId === truck.id ? "bg-white" : "bg-slate-400"}`} />
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-                  <div className="lg:col-span-5 card p-6 sm:p-8">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-8 gap-4">
-                      <div>
-                        <h3 className="font-extrabold text-xl capitalize">{format(currentMonth, "MMMM yyyy", { locale: es })}</h3>
-                        <div className="flex items-center gap-2 mt-2">
-                           <span className="text-[10px] text-slate-400 font-black uppercase tracking-[0.15em]">Unidad:</span>
-                           <select 
-                             value={calendarTruckFilterId || 'all'} 
-                             onChange={(e) => setCalendarTruckFilterId(e.target.value === 'all' ? null : e.target.value)}
-                             className="text-[10px] font-bold border-none bg-slate-100 rounded-md py-1 px-2 focus:ring-0 cursor-pointer"
-                           >
-                             <option value="all">Todas las Unidades</option>
-                             {trucks.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                           </select>
-                        </div>
-                      </div>
-                      <div className="flex gap-2">
-                        <button onClick={prevMonth} className="w-11 h-11 sm:w-12 sm:h-12 flex items-center justify-center bg-white border border-slate-200 hover:bg-slate-50 rounded-xl transition-all shadow-sm active:scale-95">
-                          <ChevronLeft className="w-5 h-5 text-slate-600" />
-                        </button>
-                        <button onClick={nextMonth} className="w-11 h-11 sm:w-12 sm:h-12 flex items-center justify-center bg-white border border-slate-200 hover:bg-slate-50 rounded-xl transition-all shadow-sm active:scale-95">
-                          <ChevronRight className="w-5 h-5 text-slate-600" />
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-7 gap-1 mb-2">
-                      {["L", "M", "X", "J", "V", "S", "D"].map(d => (
-                        <div key={d} className="text-center text-[10px] font-black text-slate-300 py-1">{d}</div>
-                      ))}
-                    </div>
-
-                    <div className="grid grid-cols-7 gap-2">
-                      {days.map((day, idx) => {
-                        const isSelected = isSameDay(day, selectedDate);
-                        const isToday = isSameDay(day, new Date());
-                        const isCurrentMonth = isSameMonth(day, currentMonth);
-                        const dayStr = format(day, "yyyy-MM-dd");
-                        const dayBookings = filteredTruckBookings.filter(b => 
-                          b.date === dayStr && 
-                          (!calendarTruckFilterId || b.truckId === calendarTruckFilterId)
-                        );
-                        const loadState = getLoadState(dayBookings);
-                        const busyMinutes = getBusyMinutes(dayBookings);
-                        const loadPercent = Math.min(100, Math.round((busyMinutes / DAILY_CAPACITY_MINUTES) * 100));
-                        
-                        const hasPending = dayBookings.some(b => b.status === "pending");
-                        const hasCompleted = dayBookings.some(b => b.status === "completed");
-
-                        return (
-                          <button
-                            key={idx}
-                            onClick={() => {
-                              if (!isCurrentMonth) return;
-                              if (window.innerWidth < 1024) {
-                                openDayDetails(day);
-                                return;
-                              }
-                              setSelectedDate(day);
-                            }}
-                            className={`
-                              calendar-cell aspect-square flex flex-col items-center justify-center rounded-2xl text-sm relative overflow-hidden border-2 border-transparent
-                              ${!isCurrentMonth ? "opacity-10 cursor-default" : "cursor-pointer"}
-                              ${isSelected ? "bg-primary text-white shadow-lg shadow-primary/30 z-10 border-primary/40" : "hover:bg-slate-50 text-slate-700"}
-                              ${isToday && !isSelected ? "border-amber-500/20 text-amber-600" : ""}
-                            `}
-                            disabled={!isCurrentMonth}
-                            title={`Carga ${loadState}`}
-                            aria-label={`${format(day, "d")} - carga ${loadState}`}
-                          >
-                            <span className="font-bold">{format(day, "d")}</span>
-                            <div className={`mt-1.5 h-2.5 w-2.5 rounded-full ${
-                              isSelected
-                                ? "bg-white"
-                                : loadState === "ocupado"
-                                  ? "bg-rose-500"
-                                  : loadState === "medio"
-                                    ? "bg-amber-500"
-                                    : "bg-emerald-500"
-                            }`} />
-                            <div className={`mt-1 h-1.5 w-10 rounded-full ${isSelected ? "bg-white/20" : "bg-slate-100"}`}>
-                              <div
-                                className={`h-full rounded-full ${
-                                  isSelected
-                                    ? "bg-white"
-                                    : loadState === "ocupado"
-                                      ? "bg-rose-500"
-                                      : loadState === "medio"
-                                        ? "bg-amber-500"
-                                        : "bg-emerald-500"
-                                }`}
-                                style={{ width: `${Math.max(dayBookings.length > 0 ? 18 : 0, loadPercent)}%` }}
-                              />
-                            </div>
-                            <div className="flex gap-1 mt-1">
-                              {hasPending && <div className={`w-1 h-1 rounded-full ${isSelected ? "bg-white" : "bg-rose-500"}`} />}
-                              {hasCompleted && <div className={`w-1 h-1 rounded-full ${isSelected ? "bg-white/60" : "bg-emerald-500"}`} />}
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  <div className="hidden lg:flex lg:col-span-7 card p-6 sm:p-8 flex-col min-h-[500px]">
-                    <div className="flex items-start justify-between mb-8 pb-1">
-                      <div>
-                        <h3 className="font-extrabold text-xl tracking-tight">Agenda del Día</h3>
-                        <div className="flex items-center gap-2 text-slate-400 mt-1.5">
-                          <CalendarIcon className="w-4 h-4 opacity-70" />
-                          <span className="text-[10px] font-black uppercase tracking-widest">{format(selectedDate, "EEEE d 'de' MMMM", { locale: es })}</span>
-                        </div>
-                      </div>
-                      {role === "agendador" && (
-                        <button 
-                          onClick={() => setShowBookingModal(true)}
-                          className="w-11 h-11 bg-primary text-white rounded-2xl hover:bg-primary-dark transition-all shadow-xl shadow-primary/20 active:scale-95 group flex items-center justify-center"
-                        >
-                          <Plus className="w-6 h-6 group-hover:rotate-90 transition-transform duration-300" />
-                        </button>
-                      )}
-                    </div>
-
-                    <div className="flex-1 space-y-4 overflow-y-auto max-h-[600px] pr-2 custom-scrollbar">
-                      {bookingsForSelectedDate.length === 0 ? (
-                        <div className="flex flex-col items-center justify-center py-20 text-slate-300">
-                          <div className="bg-slate-50 p-6 rounded-3xl border border-slate-100 mb-4">
-                            <CalendarIcon className="w-12 h-12 opacity-20" />
-                          </div>
-                          <p className="text-xs font-black uppercase tracking-widest opacity-40">Sin reservas registradas</p>
-                        </div>
-                      ) : (
-                        bookingsForSelectedDate
-                          .sort((a, b) => a.startTime.localeCompare(b.startTime))
-                          .map(booking => (
-                            <div 
-                              key={booking.id} 
-                              className={`p-5 rounded-[1.5rem] border transition-all duration-300 ${
-                                booking.status === "completed" 
-                                  ? "bg-slate-50 border-slate-200 opacity-60" 
-                                  : "bg-white border-slate-100 shadow-sm hover:shadow-md"
-                              }`}
-                            >
-                              <div className="flex justify-between items-center gap-4">
-                                <div className="space-y-3">
-                                  <div className="flex items-center gap-3">
-                                    <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${
-                                      booking.status === "completed" ? "bg-success/10 text-success" : 
-                                      booking.status === "in_progress" ? "bg-primary/10 text-primary" : "bg-warning/10 text-warning"
-                                    }`}>
-                                      <Clock className="w-3.5 h-3.5" />
-                                      {booking.startTime} - {booking.endTime}
-                                    </div>
-                                    <span className={`text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-widest ${
-                                      booking.status === "completed" ? "text-success" : 
-                                      booking.status === "in_progress" ? "text-primary animate-pulse" : "text-warning"
-                                    }`}>
-                                      {booking.status === "completed" ? "Completado" : 
-                                       booking.status === "in_progress" ? "En Proceso" : "Pendiente"}
-                                    </span>
-                                  </div>
-                                  <div className="flex items-center gap-2">
-                                    <div className="w-7 h-7 rounded-full bg-slate-100 flex items-center justify-center text-[10px] font-black text-slate-500 border border-white shadow-sm">
-                                      {booking.user.charAt(0).toUpperCase()}
-                                    </div>
-                                    <span className="text-sm font-bold text-slate-700">{booking.user}</span>
-                                  </div>
-                                </div>
-                                
-                                <div className="flex items-center gap-2">
-                                  {role === "agendador" && booking.status !== "completed" && (
-                                    <>
-                                      <button onClick={() => openEditModal(booking)} className="p-2.5 text-slate-400 hover:text-primary hover:bg-primary/5 rounded-xl transition-all">
-                                        <Edit className="w-4.5 h-4.5" />
-                                      </button>
-                                      <button onClick={() => deleteBooking(booking.id)} className="p-2.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all">
-                                        <Trash2 className="w-4.5 h-4.5" />
-                                      </button>
-                                    </>
-                                  )}
-                                  
-                                  {role === "chofer" && (
-                                    <div className="flex gap-2">
-                                      {booking.status === "pending" && (
-                                        <button 
-                                          onClick={() => updateStatus(booking.id, "in_progress")}
-                                          className="text-[10px] font-black bg-primary text-white px-5 py-2.5 rounded-xl shadow-lg shadow-primary/20 hover:shadow-primary/40 active:scale-95 transition-all uppercase tracking-widest"
-                                        >
-                                          INICIAR
-                                        </button>
-                                      )}
-                                      {booking.status === "in_progress" && (
-                                        <button 
-                                          onClick={() => updateStatus(booking.id, "completed")}
-                                          className="text-[10px] font-black bg-success text-white px-5 py-2.5 rounded-xl shadow-lg shadow-success/20 hover:shadow-success/40 active:scale-95 transition-all uppercase tracking-widest"
-                                        >
-                                          FINALIZAR
-                                        </button>
-                                      )}
-                                    </div>
-                                  )}
-                                  
-                                  {booking.status === "completed" && (
-                                    <div className="bg-success text-white p-2 rounded-xl">
-                                      <CheckCircle2 className="w-5 h-5" />
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                          ))
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="lg:hidden card p-5 space-y-4">
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <h3 className="font-extrabold text-lg tracking-tight">Detalle rápido</h3>
-                      <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400 mt-1">
-                        {calendarTruckFilterId
-                          ? trucks.find((truck) => truck.id === calendarTruckFilterId)?.name
-                          : "Todas las unidades"}
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => openDayDetails(selectedDate)}
-                      className="btn-secondary px-4 py-3 text-[10px] font-black uppercase tracking-[0.18em]"
-                    >
-                      Ver agenda
-                    </button>
-                  </div>
-                  <div className="rounded-[1.5rem] bg-slate-50 border border-slate-100 p-4">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-extrabold capitalize">
-                        {format(selectedDate, "EEEE d 'de' MMMM", { locale: es })}
-                      </span>
-                      <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
-                        {getLoadState(bookingsForSelectedDate)}
-                      </span>
-                    </div>
-                    <div className="mt-3 space-y-2">
-                      {bookingsForSelectedDate.slice(0, 3).map((booking) => (
-                        <div key={booking.id} className="flex items-center justify-between rounded-2xl bg-white px-4 py-3 border border-slate-100">
-                          <div>
-                            <div className="text-sm font-bold text-slate-700">{booking.user}</div>
-                            <div className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">
-                              {booking.startTime} - {booking.endTime}
-                            </div>
-                          </div>
-                          <span className={`text-[10px] font-black uppercase tracking-[0.18em] ${
-                            booking.status === "completed"
-                              ? "text-emerald-600"
-                              : booking.status === "in_progress"
-                                ? "text-primary"
-                                : "text-amber-600"
-                          }`}>
-                            {booking.status === "completed" ? "Completado" : booking.status === "in_progress" ? "En proceso" : "Pendiente"}
-                          </span>
-                        </div>
-                      ))}
-                      {bookingsForSelectedDate.length === 0 && (
-                        <p className="text-center py-5 text-sm font-bold text-slate-400">Sin reservas para este dia.</p>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="space-y-6 animate-fade-in">
-                <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-6 px-1">
-                  <div>
-                    <h2 className="text-3xl font-extrabold tracking-tight">Agenda de Recibo</h2>
-                    <p className="text-[11px] text-slate-400 uppercase tracking-[0.2em] font-black mt-1">Planificación Logística de Entrada</p>
-                    <div className="mt-4 flex flex-wrap items-center gap-2">
-                      <button
-                        onClick={() => setReceiptFilterMode("open")}
-                        className={`px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-[0.18em] border transition-all ${
-                          receiptFilterMode === "open"
-                            ? "bg-primary text-white border-primary shadow-lg shadow-primary/20"
-                            : "bg-white text-slate-500 border-slate-200"
-                        }`}
-                      >
-                        Abiertas
-                      </button>
-                      <button
-                        onClick={() => setReceiptFilterMode("relevant")}
-                        className={`px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-[0.18em] border transition-all ${
-                          receiptFilterMode === "relevant"
-                            ? "bg-primary text-white border-primary shadow-lg shadow-primary/20"
-                            : "bg-white text-slate-500 border-slate-200"
-                        }`}
-                      >
-                        Relevantes
-                      </button>
-                      <button
-                        onClick={() => setReceiptFilterMode("all")}
-                        className={`px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-[0.18em] border transition-all ${
-                          receiptFilterMode === "all"
-                            ? "bg-primary text-white border-primary shadow-lg shadow-primary/20"
-                            : "bg-white text-slate-500 border-slate-200"
-                        }`}
-                      >
-                        Todas
-                      </button>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <div className="flex items-center bg-white p-2 rounded-2xl border border-slate-200 shadow-sm">
-                      <button onClick={prevMonth} className="p-2 hover:bg-slate-50 rounded-xl transition-colors">
-                        <ChevronLeft className="w-5 h-5 text-slate-600" />
-                      </button>
-                      <span className="px-6 font-extrabold text-sm min-w-[160px] text-center capitalize text-slate-700">
-                        {format(currentMonth, "MMMM yyyy", { locale: es })}
-                      </span>
-                      <button onClick={nextMonth} className="p-2 hover:bg-slate-50 rounded-xl transition-colors">
-                        <ChevronRight className="w-5 h-5 text-slate-600" />
-                      </button>
-                    </div>
-                    {role === "agendador" && (
-                      <button 
-                        onClick={() => { setSelectedDate(new Date()); setShowBookingModal(true); }}
-                        className="p-4 bg-primary text-white rounded-2xl shadow-xl shadow-primary/20 hover:bg-primary-dark transition-all"
-                      >
-                        <Plus className="w-6 h-6" />
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                <div className="card p-4 sm:p-5">
-                  <div className="flex flex-wrap items-center gap-3 text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">
-                    <span className="flex items-center gap-1.5">
-                      <span className="inline-block h-2.5 w-2.5 rounded-full bg-emerald-500" />
-                      Carga ligera
-                    </span>
-                    <span className="flex items-center gap-1.5">
-                      <span className="inline-block h-2.5 w-2.5 rounded-full bg-amber-500" />
-                      Carga estandar
-                    </span>
-                    <span className="flex items-center gap-1.5">
-                      <span className="inline-block h-2.5 w-2.5 rounded-full bg-rose-500" />
-                      Carga pesada
-                    </span>
-                    <span className="flex items-center gap-1.5">
-                      <Database className="w-3.5 h-3.5 text-amber-600" />
-                      Orden SAP
-                    </span>
-                  </div>
-                </div>
-
-                <div className="card overflow-hidden border-none shadow-2xl">
-                  <div className="grid grid-cols-6 bg-primary text-white">
-                    {["LUN", "MAR", "MIÉ", "JUE", "VIE", "SÁB"].map(d => (
-                      <div key={d} className="p-5 text-center text-[10px] font-black border-r border-white/10 last:border-0 tracking-[0.2em]">
-                        {d}
-                      </div>
-                    ))}
-                  </div>
-                  <div className="grid grid-cols-6 auto-rows-[120px] sm:auto-rows-[180px] bg-slate-200 gap-[1px]">
-                    {days.filter(d => getDay(d) !== 0).map((day, idx) => {
-                      const dateStr = format(day, "yyyy-MM-dd");
-                      const manualBookings = bookings.filter(b => b.date === dateStr && b.category === "recibo");
-                      const sapOrdersForDay = sapBookings.filter(b => b.date === dateStr);
-                      const allDayBookings = [...manualBookings, ...sapOrdersForDay];
-                      
-                      const pendingCount = allDayBookings.filter(b => b.status === "pending").length;
-                      const isCurrentMonth = isSameMonth(day, currentMonth);
-                      const isToday = isSameDay(day, new Date());
-
-                      return (
-                        <div 
-                          key={idx} 
-                          className={`bg-white p-3 flex flex-col group relative cursor-pointer overflow-hidden border-r border-b border-slate-100 last:border-r-0 ${
-                            !isCurrentMonth ? "bg-slate-50/50 opacity-30" : "hover:bg-slate-50"
-                          }`}
-                          onClick={() => {
-                            if (isCurrentMonth) {
-                              setSelectedDayForDetails(day);
-                              setShowDayDetailsModal(true);
-                            }
-                          }}
-                        >
-                          <div className="flex justify-between items-start">
-                            <span className={`text-xs font-black w-7 h-7 flex items-center justify-center rounded-xl transition-all ${
-                              isToday ? "bg-primary text-white shadow-lg shadow-primary/30" : isCurrentMonth ? "text-slate-700 bg-slate-100 group-hover:bg-white" : "text-slate-300"
-                            }`}>
-                              {format(day, "d")}
-                            </span>
-                            <div className="flex items-center gap-1">
-                              {sapOrdersForDay.some((b) => b.materialType === "carga_pesada") && <span className="inline-block h-2 w-2 rounded-full bg-rose-500" title="Carga pesada" />}
-                              {sapOrdersForDay.some((b) => b.materialType === "carga_estandar") && <span className="inline-block h-2 w-2 rounded-full bg-amber-500" title="Carga estandar" />}
-                              {sapOrdersForDay.some((b) => b.materialType === "carga_ligera") && <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" title="Carga ligera" />}
-                              {sapOrdersForDay.length > 0 && (
-                                <div className="bg-amber-100 text-amber-700 p-1 rounded-md" title="Orden de SAP">
-                                  <Database className="w-3 h-3" />
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                          
-                          <div className="flex-1 flex flex-col items-center justify-center">
-                            {pendingCount > 0 ? (
-                              <div className="flex flex-col items-center justify-center animate-in zoom-in duration-300">
-                                <span className="text-4xl font-black text-warning leading-none">{pendingCount}</span>
-                                <span className="text-[8px] font-black text-warning uppercase tracking-widest mt-1">PENDIENTES</span>
-                              </div>
-                            ) : allDayBookings.length > 0 ? (
-                              <div className="bg-success/10 p-2.5 rounded-2xl">
-                                <CheckCircle2 className="w-7 h-7 text-success opacity-40" />
-                              </div>
-                            ) : null}
-                          </div>
-
-                          <div className="mt-auto flex justify-center gap-1">
-                            {allDayBookings.slice(0, 4).map(b => (
-                              <div key={b.id} className={`w-1.5 h-1.5 rounded-full ${b.status === 'completed' ? 'bg-success' : 'bg-warning'} ${b.isSap ? 'border border-white shadow-sm' : ''}`} />
-                            ))}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-            )}
-          </main>
-
-          <nav className="fixed bottom-0 left-0 right-0 glass border-t border-slate-200 p-3 lg:hidden z-[100]">
+          {/* Mobile Module Switcher - Galipote Style */}
+          <nav className="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-xl border-t border-border p-3 lg:hidden z-[100] shadow-2xl">
             <div className="flex justify-around items-center max-w-md mx-auto">
-              <button 
+              <button
                 onClick={() => setActiveModule("agenda_camion")}
-                className={`flex flex-col items-center gap-1.5 p-2 rounded-2xl transition-all ${activeModule === "agenda_camion" ? "text-primary bg-primary/5" : "text-slate-400"}`}
+                className={`flex flex-col items-center gap-1 px-6 py-2 rounded-2xl transition-all ${
+                  activeModule === "agenda_camion"
+                    ? "bg-primary text-white shadow-xl shadow-primary/20 scale-105"
+                    : "text-text-muted"
+                }`}
               >
-                <Truck className="w-6 h-6" />
-                <span className="text-[10px] font-bold uppercase tracking-widest">Camiones</span>
+                <Truck className="w-5 h-5" />
+                <span className="text-[9px] font-black uppercase tracking-widest">Camiones</span>
               </button>
-              
-              <div className="w-14 h-14 bg-primary text-white rounded-full flex items-center justify-center -mt-10 border-[6px] border-slate-50 shadow-2xl shadow-primary/40 relative">
-                <Shield className="w-6 h-6" />
-              </div>
-
-              <button 
-                onClick={() => setActiveModule("agenda_recibo")}
-                className={`flex flex-col items-center gap-1.5 p-2 rounded-2xl transition-all ${activeModule === "agenda_recibo" ? "text-primary bg-primary/5" : "text-slate-400"}`}
+              <button
+                onClick={() => setActiveModule("asistente_recibo")}
+                className={`flex flex-col items-center gap-1 px-6 py-2 rounded-2xl transition-all ${
+                  activeModule === "asistente_recibo"
+                    ? "bg-primary text-white shadow-xl shadow-primary/20 scale-105"
+                    : "text-text-muted"
+                }`}
               >
-                <CheckCircle2 className="w-6 h-6" />
-                <span className="text-[10px] font-bold uppercase tracking-widest">Recibos</span>
+                <CheckCircle2 className="w-5 h-5" />
+                <span className="text-[9px] font-black uppercase tracking-widest">Recibos</span>
               </button>
             </div>
           </nav>
 
           <AnimatePresence>
             {showBookingModal && (
-              <div className="modal-overlay fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-900/50 backdrop-blur-sm">
-                <div className="card w-full max-w-md overflow-hidden relative rounded-t-[2.5rem] sm:rounded-[2.5rem] pb-8 sm:pb-0 shadow-2xl">
-                  <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto my-4 sm:hidden" />
-                  <div className="p-8 pt-4 sm:pt-8">
-                    <div className="flex items-center justify-between mb-8">
-                      <div>
-                        <h3 className="text-2xl font-black tracking-tight">{editingBookingId ? "Editar Agenda" : "Nueva Reserva"}</h3>
-                        <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Planificación para el camión seleccionado</p>
+              <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+                <motion.div 
+                  initial={{ opacity: 0, scale: 0.9, y: 20 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.9, y: 20 }}
+                  className="bg-white w-full max-w-md rounded-[2.5rem] border border-border shadow-soft overflow-hidden"
+                >
+                  <div className="flex items-center justify-between p-8 border-b border-border">
+                    <div className="flex items-center gap-4">
+                      <div className="p-3 bg-primary/10 rounded-2xl border border-primary/20 shadow-lg">
+                        <Truck className="w-6 h-6 text-primary" />
                       </div>
-                      <button onClick={() => { setShowBookingModal(false); setEditingBookingId(null); }} className="p-2 bg-slate-50 hover:bg-red-50 hover:text-red-500 rounded-xl transition-all">
-                        <X className="w-5 h-5" />
-                      </button>
+                      <h3 className="text-lg font-black text-text uppercase tracking-tighter">
+                        {editingBookingId ? "Editar agendamiento" : "Nuevo agendamiento"}
+                      </h3>
                     </div>
-
-                    <div className="space-y-6">
+                    <button onClick={() => setShowBookingModal(false)} className="p-3 bg-gray-100 hover:bg-gray-200 rounded-2xl transition-colors text-gray-500 hover:text-gray-900">
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+                  
+                  <div className="p-8 space-y-6">
+                    <div className="space-y-5">
                       <div className="space-y-2">
-                        <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Fecha de agenda</label>
-                        <div className="relative group">
-                          <CalendarIcon className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-primary transition-colors" />
-                          <input
-                            type="date"
-                            value={format(selectedDate, "yyyy-MM-dd")}
-                            onChange={(e) => setSelectedDate(parse(e.target.value, "yyyy-MM-dd", new Date()))}
-                            className="w-full pl-12 pr-4 py-4 rounded-[1.25rem] border border-slate-200 bg-slate-50 focus:bg-white focus:ring-4 focus:ring-primary/10 transition-all font-bold text-sm"
-                          />
-                        </div>
-                      </div>
-
-                      <div className="space-y-2">
-                        <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Unidad de Transporte</label>
-                        <div className="relative group">
-                          <Truck className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-primary transition-colors" />
-                          <select 
-                            value={selectedTruckId || ""}
-                            onChange={(e) => setSelectedTruckId(e.target.value)}
-                            className="w-full pl-12 pr-4 py-4 rounded-[1.25rem] border border-slate-200 bg-slate-50 focus:bg-white focus:ring-4 focus:ring-primary/10 transition-all font-bold text-sm appearance-none"
-                          >
-                            {trucks.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                          </select>
-                        </div>
+                        <label className="text-[10px] font-black uppercase tracking-widest text-text-muted ml-1">Referencia / Chofer</label>
+                        <input
+                          type="text"
+                          value={bookingUser}
+                          onChange={(e) => setBookingUser(e.target.value)}
+                          className="w-full px-5 py-4 rounded-2xl border border-border bg-gray-50 focus:bg-white focus:border-primary focus:ring-4 focus:ring-primary/10 outline-none text-sm font-bold text-text placeholder:text-gray-400 transition-all font-sans"
+                          placeholder="Nombre del chofer o placa"
+                        />
                       </div>
 
                       <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-2">
-                          <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Hora Inicio</label>
-                          <select value={startTime} onChange={(e) => setStartTime(e.target.value)} className="w-full p-4 rounded-[1.25rem] border border-slate-200 bg-white font-bold text-sm focus:ring-4 focus:ring-primary/10 outline-none">
-                            {timeSlots.map(slot => <option key={slot} value={slot}>{slot}</option>)}
-                          </select>
+                          <label className="text-[10px] font-black uppercase tracking-widest text-text-muted ml-1">Fecha</label>
+                          <input
+                            type="date"
+                            value={format(selectedDate, "yyyy-MM-dd")}
+                            onChange={(e) => setSelectedDate(parse(e.target.value, "yyyy-MM-dd", new Date()))}
+                            className="w-full px-5 py-4 rounded-2xl border border-border bg-gray-50 focus:bg-white focus:border-primary outline-none text-sm font-bold text-text transition-all font-sans"
+                          />
                         </div>
-                        <div className="space-y-2">
-                          <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Hora Fin</label>
-                          <select value={endTime} onChange={(e) => setEndTime(e.target.value)} className="w-full p-4 rounded-[1.25rem] border border-slate-200 bg-white font-bold text-sm focus:ring-4 focus:ring-primary/10 outline-none">
-                            {timeSlots.map(slot => <option key={slot} value={slot}>{slot}</option>)}
+
+                        <div className="space-y-2 relative">
+                          <label className="text-[10px] font-black uppercase tracking-widest text-text-muted ml-1">Transporte</label>
+                          <select 
+                            value={selectedTruckId || ""}
+                            onChange={(e) => setSelectedTruckId(e.target.value)}
+                            className="w-full px-5 py-4 rounded-2xl border border-border bg-gray-50 focus:bg-white focus:border-primary outline-none text-sm font-bold text-text appearance-none cursor-pointer transition-all font-sans"
+                          >
+                            {trucks.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
                           </select>
+                          <ChevronLeft className="w-4 h-4 text-gray-400 absolute right-4 bottom-[18px] pointer-events-none -rotate-90" />
                         </div>
                       </div>
 
-                      <div className="pt-6">
-                        <button onClick={createBooking} className="btn-primary w-full py-4 text-base font-bold shadow-xl shadow-primary/30 flex items-center justify-center gap-2">
-                          {editingBookingId ? "Actualizar Reserva" : "Confirmar Agenda"}
-                          <CheckCircle2 className="w-5 h-5" />
-                        </button>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2 relative">
+                          <label className="text-[10px] font-black uppercase tracking-widest text-text-muted ml-1">Hora Inicio</label>
+                          <select value={startTime} onChange={(e) => setStartTime(e.target.value)} className="w-full px-5 py-4 rounded-2xl border border-border bg-gray-50 focus:bg-white focus:border-primary outline-none text-sm font-bold text-text appearance-none cursor-pointer transition-all font-sans">
+                            {timeSlots.map(slot => <option key={slot} value={slot}>{slot}</option>)}
+                          </select>
+                          <Clock className="w-4 h-4 text-gray-400 absolute right-4 bottom-[18px] pointer-events-none" />
+                        </div>
+                        <div className="space-y-2 relative">
+                          <label className="text-[10px] font-black uppercase tracking-widest text-text-muted ml-1">Hora Fin</label>
+                          <select value={endTime} onChange={(e) => setEndTime(e.target.value)} className="w-full px-5 py-4 rounded-2xl border border-border bg-gray-50 focus:bg-white focus:border-primary outline-none text-sm font-bold text-text appearance-none cursor-pointer transition-all font-sans">
+                            {timeSlots.map(slot => <option key={slot} value={slot}>{slot}</option>)}
+                          </select>
+                          <Clock className="w-4 h-4 text-gray-400 absolute right-4 bottom-[18px] pointer-events-none" />
+                        </div>
                       </div>
                     </div>
+
+                    <div className="flex justify-end gap-3 pt-6 border-t border-border">
+                      <button 
+                        onClick={() => setShowBookingModal(false)}
+                        className="px-6 py-4 text-[11px] font-black uppercase tracking-widest text-text-muted hover:text-text hover:bg-gray-100 rounded-2xl transition-all active:scale-95"
+                      >
+                        Cancelar
+                      </button>
+                      <button 
+                        onClick={createBooking} 
+                        className="btn-primary flex-1 py-4 text-[11px] rounded-2xl"
+                      >
+                        {editingBookingId ? "Actualizar" : "Guardar Evento"}
+                      </button>
+                    </div>
                   </div>
-                </div>
+                </motion.div>
               </div>
             )}
           </AnimatePresence>
 
           <AnimatePresence>
             {showDayDetailsModal && selectedDayForDetails && (
-              <div className="modal-overlay fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/50 backdrop-blur-sm">
-                <div className="card w-full max-w-md p-0 overflow-hidden shadow-2xl rounded-t-[2.5rem] sm:rounded-[2.5rem] pb-8 sm:pb-0">
-                  <div className="w-12 h-1.5 bg-slate-200/20 rounded-full mx-auto my-4 sm:hidden absolute top-4 left-1/2 -translate-x-1/2 z-10" />
-                  <div className="bg-primary p-6 text-white flex justify-between items-center">
+              <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+                <div className="bg-white w-full max-w-xl rounded-[2.5rem] border border-border shadow-soft overflow-hidden overflow-y-auto max-h-[90vh] animate-fade-up">
+                  <div className="flex items-center justify-between p-8 border-b border-border bg-gray-50/30">
                     <div>
-                      <h3 className="text-xl font-black">Detalle de Agendas</h3>
-                      <p className="text-xs font-bold opacity-80 uppercase tracking-widest mt-1">
-                        {format(selectedDayForDetails, "EEEE d 'de' MMMM", { locale: es })}
+                      <h3 className="text-2xl font-black text-text uppercase tracking-tighter">
+                        {format(selectedDayForDetails, "EEEE d 'MMMM'", { locale: es })}
+                      </h3>
+                      <p className="text-[11px] font-black text-primary uppercase tracking-[0.4em] mt-1.5 opacity-70">
+                        Agenda del día
                       </p>
-                      {activeModule === "agenda_camion" && (
-                        <p className="text-[10px] font-black uppercase tracking-[0.18em] opacity-70 mt-2">
-                          {calendarTruckFilterId
-                            ? trucks.find((truck) => truck.id === calendarTruckFilterId)?.name
-                            : "Todas las unidades"}
-                        </p>
-                      )}
                     </div>
-                    <button onClick={() => setShowDayDetailsModal(false)} className="p-2 hover:bg-white/10 rounded-xl">
-                      <X className="w-6 h-6" />
+                    <button onClick={() => setShowDayDetailsModal(false)} className="p-3 bg-gray-100/80 hover:bg-gray-200 rounded-2xl transition-all text-text-muted hover:text-text active:scale-90">
+                      <X className="w-5 h-5" />
                     </button>
                   </div>
                   
-                  <div className="p-6 max-h-[60vh] overflow-y-auto custom-scrollbar bg-slate-50">
+                  <div className="p-8 bg-gray-50/50">
                     <div className="space-y-4">
                       {dayDetailBookings.length === 0 ? (
-                        <div className="text-center py-10 text-slate-400 font-bold text-sm">No hay agendas programadas</div>
+                        <div className="text-center py-20 bg-white rounded-3xl border border-dashed border-border/60">
+                          <Clock className="w-12 h-12 text-gray-200 mx-auto mb-4" />
+                          <p className="text-xs font-black text-gray-400 uppercase tracking-widest">No hay eventos para hoy</p>
+                        </div>
                       ) : (
                         dayDetailBookings.map((b) => (
-                          <div key={b.id} className={`bg-white p-4 rounded-2xl border shadow-sm ${b.isSap ? 'border-amber-100 bg-amber-50/30' : 'border-slate-100'}`}>
-                            <div className="flex items-center gap-4">
-                              <div className={`w-1.5 h-10 rounded-full ${
+                          <div key={b.id} className="bg-white p-6 rounded-3xl border border-border shadow-sm hover:border-primary/20 transition-all group">
+                            <div className="flex items-start gap-5">
+                              <div className={`w-1.5 h-16 rounded-full mt-1.5 ${
                                 b.status === 'completed'
-                                  ? 'bg-success'
+                                  ? 'bg-emerald-500 shadow-lg shadow-emerald-500/20'
                                   : b.status === 'in_progress'
-                                    ? 'bg-primary'
-                                    : 'bg-warning'
+                                    ? 'bg-primary shadow-lg shadow-primary/30'
+                                    : 'bg-amber-500 shadow-lg shadow-amber-500/20'
                               }`} />
                               <div className="flex-1">
-                                <div className="flex justify-between items-center gap-4">
-                                  <span className="font-extrabold text-sm">
-                                    {b.isSap ? `SAP PO #${b.docNum}` : trucks.find((truck) => truck.id === b.truckId)?.name || 'Camión'}
-                                  </span>
-                                  <span className="text-[10px] font-black text-slate-400">
-                                    {b.isSap ? 'DocDueDate' : `${b.startTime} - ${b.endTime}`}
-                                  </span>
+                                <div className="flex justify-between items-start gap-6">
+                                  <div>
+                                    <span className="font-black text-text text-lg block uppercase tracking-tight leading-none mb-1">
+                                      {b.isSap ? `ORDEN #${b.docNum}` : b.user}
+                                    </span>
+                                    <span className="text-[11px] font-black text-text-muted uppercase tracking-widest opacity-60">
+                                      {b.isSap ? `Carga SAP • ${b.materialType}` : trucks.find((truck) => truck.id === b.truckId)?.name || 'Carga Programada'}
+                                    </span>
+                                  </div>
+                                  <div className="text-right">
+                                    <span className="inline-flex items-center gap-2 text-[11px] font-black text-primary bg-primary/5 px-4 py-2 rounded-xl border border-primary/10">
+                                      <Clock className="w-3.5 h-3.5" />
+                                      {b.startTime} - {b.endTime}
+                                    </span>
+                                  </div>
                                 </div>
-                                <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1">
-                                  {b.isSap ? poTitle(b.user) : `Ref: ${b.user}`}
-                                </div>
+                                
                                 {b.isSap && (
-                                  <div className={`inline-flex mt-2 px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-[0.18em] ${
-                                    b.materialType === "carga_pesada"
-                                      ? "bg-rose-100 text-rose-700"
-                                      : b.materialType === "carga_estandar"
-                                        ? "bg-amber-100 text-amber-700"
-                                        : "bg-emerald-100 text-emerald-700"
-                                  }`}>
-                                    {b.materialType === "carga_pesada"
-                                      ? "Carga pesada"
-                                      : b.materialType === "carga_estandar"
-                                        ? "Carga estandar"
-                                        : "Carga ligera"}
+                                  <div className="mt-4 p-4 bg-amber-50 rounded-2xl text-[11px] text-amber-800 border border-amber-100 flex items-center gap-4 shadow-sm shadow-amber-900/5">
+                                    <Database className="w-5 h-5 flex-none text-amber-600" />
+                                    <div>
+                                      <div className="font-black mb-1 uppercase tracking-widest">{poTitle(b.user)}</div>
+                                      <div className="opacity-70 font-bold tracking-tight">Sincronizado vía SAP Service Layer</div>
+                                    </div>
                                   </div>
                                 )}
                               </div>
-                              {b.isSap && (
-                                <Database className="w-4 h-4 text-amber-500 ml-auto" />
-                              )}
                             </div>
 
                             {!b.isSap && activeModule === "agenda_camion" && (
-                              <div className="mt-4 flex items-center justify-end gap-2">
+                              <div className="mt-6 flex items-center justify-end gap-3 border-t border-border/50 pt-5">
                                 {role === "agendador" && b.status !== "completed" && (
                                   <>
                                     <button
@@ -1309,7 +1107,7 @@ export default function App() {
                                         setShowDayDetailsModal(false);
                                         openEditModal(b);
                                       }}
-                                      className="rounded-xl border border-slate-200 px-3 py-2 text-[10px] font-black uppercase tracking-[0.18em] text-slate-500 hover:text-primary hover:border-primary/20"
+                                      className="px-5 py-2.5 text-[11px] font-black uppercase tracking-widest text-primary hover:bg-primary/5 rounded-xl border border-primary/20 transition-all hover:border-primary/40 active:scale-95"
                                     >
                                       Editar
                                     </button>
@@ -1318,26 +1116,26 @@ export default function App() {
                                         setShowDayDetailsModal(false);
                                         deleteBooking(b.id);
                                       }}
-                                      className="rounded-xl border border-red-100 bg-red-50 px-3 py-2 text-[10px] font-black uppercase tracking-[0.18em] text-red-500"
+                                      className="px-5 py-2.5 text-[11px] font-black uppercase tracking-widest text-red-500 hover:bg-red-50 rounded-xl border border-red-200 transition-all hover:border-red-300 active:scale-95"
                                     >
-                                      Eliminar
+                                      ELIMINAR
                                     </button>
                                   </>
                                 )}
                                 {role === "chofer" && b.status === "pending" && (
                                   <button
                                     onClick={() => updateStatus(b.id, "in_progress")}
-                                    className="rounded-xl bg-primary px-3 py-2 text-[10px] font-black uppercase tracking-[0.18em] text-white"
+                                    className="bg-primary px-8 py-3 text-[11px] font-black text-white rounded-xl shadow-xl shadow-primary/30 hover:bg-primary/90 hover:scale-105 active:scale-95 transition-all uppercase tracking-widest"
                                   >
-                                    Iniciar
+                                    Iniciar Operación
                                   </button>
                                 )}
                                 {role === "chofer" && b.status === "in_progress" && (
                                   <button
                                     onClick={() => updateStatus(b.id, "completed")}
-                                    className="rounded-xl bg-success px-3 py-2 text-[10px] font-black uppercase tracking-[0.18em] text-white"
+                                    className="bg-emerald-500 px-8 py-3 text-[11px] font-black text-white rounded-xl shadow-xl shadow-emerald-500/30 hover:bg-emerald-600 hover:scale-105 active:scale-95 transition-all uppercase tracking-widest"
                                   >
-                                    Finalizar
+                                    Finalizar Tarea
                                   </button>
                                 )}
                               </div>
@@ -1347,56 +1145,67 @@ export default function App() {
                       )}
                     </div>
                   </div>
-                  <div className="p-4 border-t border-slate-100 bg-white">
-                    <div className="flex gap-3">
-                      {role === "agendador" && activeModule === "agenda_camion" && (
-                        <button
-                          onClick={() => {
-                            setSelectedDate(selectedDayForDetails);
-                            setShowDayDetailsModal(false);
-                            setShowBookingModal(true);
-                          }}
-                          className="btn-primary flex-1 py-4 text-xs font-black uppercase tracking-[0.2em]"
-                        >
-                          Nueva agenda
-                        </button>
-                      )}
-                      <button onClick={() => setShowDayDetailsModal(false)} className="flex-1 py-4 text-xs font-black uppercase tracking-[0.2em] text-slate-400 hover:text-slate-600 transition-colors">Cerrar Ventana</button>
-                    </div>
+                  
+                  <div className="px-8 py-6 border-t border-border bg-white flex justify-end gap-4">
+                    <button onClick={() => setShowDayDetailsModal(false)} className="px-7 py-3.5 text-[11px] font-black uppercase tracking-[0.2em] text-text-muted hover:text-text hover:bg-gray-100 rounded-2xl transition-all active:scale-95">
+                      Cerrar
+                    </button>
+                    {role === "agendador" && activeModule === "agenda_camion" && (
+                      <button
+                        onClick={() => {
+                          setSelectedDate(selectedDayForDetails);
+                          setShowDayDetailsModal(false);
+                          setShowBookingModal(true);
+                        }}
+                        className="bg-primary text-white px-8 py-3.5 text-[11px] font-black rounded-2xl shadow-xl shadow-primary/30 hover:bg-primary/90 hover:scale-105 active:scale-95 transition-all uppercase tracking-[0.2em]"
+                      >
+                        Agendar Carga
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
             )}
           </AnimatePresence>
-        </>
+        </div>
       )}
 
       {/* Confirmation Modal - Always at the Root for Accessibility during Login Errors */}
       <AnimatePresence>
         {showConfirmModal && confirmConfig && (
-          <div className="modal-overlay fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
-            <div className="card w-full max-w-sm p-8 shadow-3xl text-center relative overflow-hidden">
-              <div className={`absolute top-0 left-0 right-0 h-1.5 ${confirmConfig.type === 'danger' ? 'bg-red-500' : 'bg-primary'}`} />
-              
-              <div className={`mx-auto w-16 h-16 rounded-3xl flex items-center justify-center mb-6 ${confirmConfig.type === 'danger' ? 'bg-red-50 text-red-500' : 'bg-primary/10 text-primary'}`}>
-                {confirmConfig.type === 'danger' ? <AlertTriangle className="w-8 h-8" /> : <CheckCircle2 className="w-8 h-8" />}
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+            <div className="bg-white w-full max-w-md rounded-[3rem] border border-border shadow-soft p-10 animate-fade-up">
+              <div className="flex flex-col items-center gap-6 mb-10 text-center">
+                <div className={`p-6 rounded-3xl border-2 ${
+                  confirmConfig.type === 'danger' 
+                    ? 'bg-red-50 border-red-100 text-red-500' 
+                    : 'bg-primary/5 border-primary/10 text-primary'
+                }`}>
+                  {confirmConfig.type === 'danger' ? <AlertTriangle className="w-10 h-10" /> : <CheckCircle2 className="w-10 h-10" />}
+                </div>
+                <div className="space-y-3">
+                  <h3 className="text-2xl font-black text-text uppercase tracking-tighter leading-none">{confirmConfig.title}</h3>
+                  <p className="text-[12px] font-bold text-text-muted uppercase tracking-widest px-4 leading-relaxed opacity-70">{confirmConfig.message}</p>
+                </div>
               </div>
               
-              <h3 className="text-2xl font-black tracking-tight mb-3">{confirmConfig.title}</h3>
-              <p className="text-slate-500 text-sm font-medium leading-relaxed mb-8">{confirmConfig.message}</p>
-              
-              <div className="grid grid-cols-1 gap-3">
+              <div className="flex flex-col gap-4">
                 <button 
                   onClick={() => { confirmConfig.onConfirm(); setShowConfirmModal(false); }}
-                  className={`py-4 rounded-2xl font-extrabold text-sm uppercase tracking-widest shadow-xl transition-all active:scale-95 ${
-                    confirmConfig.type === 'danger' ? 'bg-red-500 text-white shadow-red-500/20' : 'bg-primary text-white shadow-primary/20'
+                  className={`w-full py-5 rounded-2xl text-[12px] font-black uppercase tracking-[0.2em] shadow-xl transition-all hover:scale-[1.02] active:scale-95 text-white ${
+                    confirmConfig.type === 'danger' 
+                      ? 'bg-red-500 hover:bg-red-600 shadow-red-500/30' 
+                      : 'bg-primary hover:bg-primary/90 shadow-primary/30'
                   }`}
                 >
-                  {confirmConfig.confirmLabel || 'Entendido'}
+                  {confirmConfig.confirmLabel || 'Confirmar'}
                 </button>
                 {confirmConfig.showCancel !== false && (
-                  <button onClick={() => setShowConfirmModal(false)} className="py-4 text-xs font-black text-slate-400 uppercase tracking-widest hover:text-slate-600 transition-colors">
-                    Cancelar
+                  <button 
+                    onClick={() => setShowConfirmModal(false)}
+                    className="w-full py-5 text-[12px] font-black uppercase tracking-[0.2em] text-text-muted hover:text-text hover:bg-gray-100 rounded-2xl transition-all"
+                  >
+                    Regresar
                   </button>
                 )}
               </div>
@@ -1407,56 +1216,42 @@ export default function App() {
 
       <AnimatePresence>
         {showContactModal && (
-          <div className="modal-overlay fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
-            <div className="card w-full max-w-sm p-6 shadow-3xl relative overflow-hidden">
-              <div className="flex items-center justify-between mb-5">
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/40 backdrop-blur-md">
+            <div className="bg-white w-full max-w-lg rounded-[3rem] border border-border shadow-soft overflow-hidden animate-fade-up">
+              <div className="p-8 border-b border-border flex items-center justify-between bg-gray-50/50">
                 <div>
-                  <h3 className="text-xl font-black tracking-tight">Contacto</h3>
-                  <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400 mt-1">Soporte de la aplicación</p>
+                  <h3 className="text-2xl font-black text-text uppercase tracking-tighter">Centro de Ayuda</h3>
+                  <p className="text-[11px] font-black text-primary uppercase tracking-[0.4em] mt-1.5 opacity-80">Soporte Técnico Especializado</p>
                 </div>
-                <button
-                  onClick={() => setShowContactModal(false)}
-                  className="p-2 bg-slate-50 hover:bg-red-50 hover:text-red-500 rounded-xl transition-all"
-                >
-                  <X className="w-4 h-4" />
+                <button onClick={() => setShowContactModal(false)} className="p-3 bg-white/80 hover:bg-gray-200 rounded-2xl transition-all text-text-muted hover:text-text active:scale-90">
+                  <X className="w-5 h-5" />
                 </button>
               </div>
-
-              <div className="space-y-3">
-                <a
-                  href="mailto:propietario@empresa.com"
-                  className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white p-3 hover:border-primary/30 transition-all"
-                >
-                  <Mail className="w-4 h-4 text-primary" />
+              <div className="p-8 space-y-4">
+                <a href="mailto:soporte@galipote.com" className="flex items-center gap-6 p-6 bg-white hover:bg-primary/5 rounded-[2rem] border border-border hover:border-primary/30 transition-all group shadow-sm">
+                  <div className="p-4 bg-primary/10 text-primary rounded-2xl border border-primary/20 group-hover:scale-110 transition-all duration-300">
+                    <Mail className="w-6 h-6" />
+                  </div>
                   <div>
-                    <p className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-400">Correo</p>
-                    <p className="text-sm font-bold text-slate-700">propietario@empresa.com</p>
+                    <p className="text-[11px] font-black text-text-muted uppercase tracking-widest mb-1 italic opacity-60">Soporte Express</p>
+                    <p className="text-lg font-black text-text tracking-tight group-hover:text-primary transition-colors">soporte@galipote.com</p>
                   </div>
                 </a>
-
-                <a
-                  href="https://wa.me/573000000000"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white p-3 hover:border-primary/30 transition-all"
-                >
-                  <MessageCircle className="w-4 h-4 text-primary" />
+                <a href="tel:+18295550123" className="flex items-center gap-6 p-6 bg-white hover:bg-emerald-50 rounded-[2rem] border border-border hover:border-emerald-300 transition-all group shadow-sm">
+                  <div className="p-4 bg-emerald-50 text-emerald-600 rounded-2xl border border-emerald-200 group-hover:scale-110 transition-all duration-300">
+                    <Phone className="w-6 h-6" />
+                  </div>
                   <div>
-                    <p className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-400">WhatsApp</p>
-                    <p className="text-sm font-bold text-slate-700">+57 300 000 0000</p>
+                    <p className="text-[11px] font-black text-text-muted uppercase tracking-widest mb-1 italic opacity-60">Línea Directa</p>
+                    <p className="text-lg font-black text-text tracking-tight group-hover:text-emerald-600 transition-colors">+1 (829) 555-0123</p>
                   </div>
                 </a>
-
-                <a
-                  href="tel:+573000000000"
-                  className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white p-3 hover:border-primary/30 transition-all"
+                <button 
+                  onClick={() => setShowContactModal(false)}
+                  className="w-full mt-6 py-5 bg-gray-100 hover:bg-gray-200 text-text-muted rounded-[1.5rem] font-black uppercase tracking-[0.3em] transition-all border border-border text-[11px]"
                 >
-                  <Phone className="w-4 h-4 text-primary" />
-                  <div>
-                    <p className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-400">Teléfono</p>
-                    <p className="text-sm font-bold text-slate-700">+57 300 000 0000</p>
-                  </div>
-                </a>
+                  Entendido
+                </button>
               </div>
             </div>
           </div>
